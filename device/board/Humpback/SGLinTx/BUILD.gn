@@ -1,0 +1,7 @@
+import("//build/ohos.gni")
+
+group("sglintx_group") {
+  deps = [
+    "kernel:kernel",
+  ]
+}

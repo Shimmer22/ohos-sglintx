@@ -1,0 +1,23 @@
+import("//build/config/clang/clang.gni")
+import("//build/ohos.gni")
+
+kernel_build_script_dir = "//device/board/Humpback/SGLinTx/kernel"
+kernel_source_dir = "//kernel/linux/linux-5.10"
+
+action("kernel") {
+  script = "build_kernel.sh"
+  sources = [ kernel_source_dir ]
+
+  product_path = "vendor/$product_company/$product_name"
+  outputs = [ "$root_build_dir/packages/phone/images/Image" ]
+  args = [
+    rebase_path(kernel_build_script_dir, root_build_dir),
+    rebase_path("$root_build_dir/packages/phone/images"),
+    rebase_path("//device/board/Humpback/$device_name"),
+    product_path,
+    rebase_path("$root_build_dir/../.."),
+    device_company,
+    device_name,
+    product_company,
+  ]
+}

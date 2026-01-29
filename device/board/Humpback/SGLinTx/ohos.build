@@ -1,0 +1,10 @@
+{
+    "subsystem": "device_sglintx",
+    "parts": {
+        "device_sglintx": {
+            "module_list": [
+                "//device/board/Humpback/SGLinTx:sglintx_group"
+            ]
+        }
+    }
+}
