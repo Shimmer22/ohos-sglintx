@@ -96,6 +96,11 @@ sed -i 's/v0p7//g' arch/riscv/Makefile
 # 9. Disable linker relaxation (Use -Wa,-mno-relax to ensure it enters Assembler)
 sed -i 's/KBUILD_CFLAGS += -mabi=lp64/KBUILD_CFLAGS += -Wa,-mno-relax -mabi=lp64/g' arch/riscv/Makefile
 sed -i 's/KBUILD_AFLAGS += -mabi=lp64/KBUILD_AFLAGS += -Wa,-mno-relax -mabi=lp64/g' arch/riscv/Makefile
+
+# 10. Force disable linker relaxation in VDSO Makefile (Critical for ld.lld)
+sed -i 's/ccflags-y := -fno-stack-protector/ccflags-y := -fno-stack-protector -Wa,-mno-relax/g' arch/riscv/kernel/vdso/Makefile
+sed -i 's/asflags-y :=/asflags-y := -Wa,-mno-relax/g' arch/riscv/kernel/vdso/Makefile
+# -------------------------------------------------------------------
 # -------------------------------------------------------------------
 
 # 2. HDF Patch
