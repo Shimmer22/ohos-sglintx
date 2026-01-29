@@ -85,6 +85,9 @@ sed -i '/subdir-y += thead/d' arch/riscv/boot/dts/Makefile
 
 # 5. Remove GCC-specific flag -mno-ldd not supported by Clang
 sed -i 's/-mno-ldd//g' arch/riscv/Makefile
+# 6. Inject --target=riscv64-linux-ohos for Clang (compiles as x86 otherwise)
+sed -i 's/KBUILD_CFLAGS += -mabi=lp64/KBUILD_CFLAGS += --target=riscv64-linux-ohos -mabi=lp64/g' arch/riscv/Makefile
+sed -i 's/KBUILD_AFLAGS += -mabi=lp64/KBUILD_AFLAGS += --target=riscv64-linux-ohos -mabi=lp64/g' arch/riscv/Makefile
 # -------------------------------------------------------------------
 
 # 2. HDF Patch
