@@ -90,8 +90,8 @@ sed -i 's/-mno-ldd//g' arch/riscv/Makefile
 sed -i 's/KBUILD_CFLAGS += -mabi=lp64/KBUILD_CFLAGS += --target=riscv64-linux-ohos -mabi=lp64/g' arch/riscv/Makefile
 sed -i 's/KBUILD_AFLAGS += -mabi=lp64/KBUILD_AFLAGS += --target=riscv64-linux-ohos -mabi=lp64/g' arch/riscv/Makefile
 
-# 8. Strip v0p7 from architecture string (Appeases Clang Driver)
-sed -i 's/v0p7//g' arch/riscv/Makefile
+# 8. Replace v0p7 with v (Clang accepts v with experimental, GCC-10 interprets v as v0.7)
+sed -i 's/v0p7/v/g' arch/riscv/Makefile
 
 # 9. Disable linker relaxation (Use -Wa,-mno-relax to ensure it enters Assembler)
 sed -i 's/KBUILD_CFLAGS += -mabi=lp64/KBUILD_CFLAGS += -Wa,-mno-relax -mabi=lp64/g' arch/riscv/Makefile
