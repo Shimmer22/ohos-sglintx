@@ -82,6 +82,9 @@ find ${DTS_CVITEK_DIR} -type l -name "*.dts" -delete
 # and remove it from Makefile to prevent "No rule to make target" error
 rm -rf arch/riscv/boot/dts/thead
 sed -i '/subdir-y += thead/d' arch/riscv/boot/dts/Makefile
+
+# 5. Remove GCC-specific flag -mno-ldd not supported by Clang
+sed -i 's/-mno-ldd//g' arch/riscv/Makefile
 # -------------------------------------------------------------------
 
 # 2. HDF Patch
