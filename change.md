@@ -85,8 +85,34 @@
     *   复制内核源码 (`kernel/linux/linux-5.10`)
     *   打 Patch (HDF + Board)
     *   配置 (`SGLinTx_small_defconfig` -> `sglintx_defconfig`)
+    *   **注入 `Hybrid Bypass` 策略**: 剥离 Clang 的 `v0p7` 标志，通过 `-Wa` 传递给汇编器汇编器，解决向量扩展版本冲突。
+    *   **禁用了 Linker Relaxation**: 通过 `-Wa,-mno-relax` 解决 `ld.lld` 不支持 GCC 产生的 relocation 问题。
     *   执行 LLVM 交叉编译 (`make ARCH=riscv LLVM=1 ...`)
 *   **[修改] `device/board/Humpback/SGLinTx/BUILD.gn`**:
     *   添加了 `kernel:kernel` 到 `deps`，确保构建系统自动触发内核编译。
 
-现在执行完整构建命令将包含内核编译流程。
+## 7. 内核编译关键修复 (Kernel Build Fixes)
+
+针对内核编译过程中出现的链接和指令集错误，实施了以下关键修复：
+
+### 7.1 汇编器指令集冲突 (RISC-V Vector 0.7)
+*   **现象**: Clang 汇编器严格执行 V1.0 标准，拒绝内核中的 V0.7 指令。
+*   **修复**: 在 `build_kernel.sh` 中剥离 Clang 看到的 `v0p7` 标志，并通过 `-Wa,-march=rv64imafdcv0p7` 直接透传给 GCC 汇编器。
+
+### 7.2 链接器重定位错误 (Linker Relaxation)
+*   **现象**: `ld.lld: error: ... relocation R_RISCV_ALIGN requires unimplemented linker relaxation`.
+*   **修复**: 在 `arch/riscv/Makefile` 中全局注入 `-Wa,-mno-relax`，强制汇编器不产生需要 relaxation 的对齐指令。
+
+### 7.3 内存模型与寻址范围 (PC-relative out of range)
+*   **现象**: `relocation R_RISCV_PCREL_HI20 out of range`。
+*   **修复**: 在 `defconfig` 中启用 `CONFIG_CMODEL_MEDANY=y`，将内核内存模型从 `medlow` (2GB) 切换到 `medany` (支撑更大范围的地址跳转)。
+
+### 7.4 KALLSYMS 链接异常
+*   **现象**: 即使开启 `medany`，`kallsyms` 相关符号仍报寻址超限。
+*   **修复**: 在 `defconfig` 中通过 `CONFIG_KALLSYMS=n` 暂时禁用该功能以绕过链接死锁，优先产出可引导镜像。
+
+## 8. 最终状态
+
+*   **内核构建**: **成功**。
+*   **产物验证**: 已在 `out/SGLinTx/packages/phone/images/` 生成 `Image` (约 10MB) 和 `sg2002_licheervnano_sd.dtb`。
+*   **系统构建**: **成功**。完整生成了 `system.img`, `vendor.img`, `userdata.img` 等镜像文件。

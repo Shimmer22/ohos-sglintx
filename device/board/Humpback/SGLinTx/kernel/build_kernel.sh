@@ -90,15 +90,17 @@ sed -i 's/-mno-ldd//g' arch/riscv/Makefile
 sed -i 's/KBUILD_CFLAGS += -mabi=lp64/KBUILD_CFLAGS += --target=riscv64-linux-ohos -mabi=lp64/g' arch/riscv/Makefile
 sed -i 's/KBUILD_AFLAGS += -mabi=lp64/KBUILD_AFLAGS += --target=riscv64-linux-ohos -mabi=lp64/g' arch/riscv/Makefile
 
-# 8. Replace v0p7 with v (Clang accepts v with experimental, GCC-10 interprets v as v0.7)
-sed -i 's/v0p7/v/g' arch/riscv/Makefile
-# Inject -menable-experimental-extensions so Clang accepts 'v'
-sed -i 's/KBUILD_CFLAGS += -march=/KBUILD_CFLAGS += -menable-experimental-extensions -march=/g' arch/riscv/Makefile
-sed -i 's/KBUILD_AFLAGS += -march=/KBUILD_AFLAGS += -menable-experimental-extensions -march=/g' arch/riscv/Makefile
+# 8. Strategy: Hide v0p7 from Clang (strip it) but pass it to Assembler via -Wa
+sed -i 's/v0p7//g' arch/riscv/Makefile
+
+# Inject vector arch to assembler so it recognizes vector instructions
+# Appending to Makefile ensures it comes AFTER strict flags, winning property for GAS
+echo "KBUILD_CFLAGS += -Wa,-march=rv64imafdcv0p7" >> arch/riscv/Makefile
+echo "KBUILD_AFLAGS += -Wa,-march=rv64imafdcv0p7" >> arch/riscv/Makefile
 
 # 9. Disable linker relaxation (Use -Wa,-mno-relax to ensure it enters Assembler)
-sed -i 's/KBUILD_CFLAGS += -mabi=lp64/KBUILD_CFLAGS += -Wa,-mno-relax -mabi=lp64/g' arch/riscv/Makefile
-sed -i 's/KBUILD_AFLAGS += -mabi=lp64/KBUILD_AFLAGS += -Wa,-mno-relax -mabi=lp64/g' arch/riscv/Makefile
+echo "KBUILD_CFLAGS += -Wa,-mno-relax" >> arch/riscv/Makefile
+echo "KBUILD_AFLAGS += -Wa,-mno-relax" >> arch/riscv/Makefile
 
 # 10. Force disable linker relaxation in VDSO Makefile (Critical for ld.lld)
 sed -i 's/ccflags-y := -fno-stack-protector/ccflags-y := -fno-stack-protector -Wa,-mno-relax/g' arch/riscv/kernel/vdso/Makefile
