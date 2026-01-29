@@ -65,8 +65,11 @@ if [ -f "${HEADER_SRC}" ]; then
     cp -f ${HEADER_SRC} ${DTS_CVITEK_DIR}/
     # Also copy to standard include paths where DTC looks
     mkdir -p scripts/dtc/include-prefixes
+    rm -f scripts/dtc/include-prefixes/cvi_board_memmap.h
     cp -f ${HEADER_SRC} scripts/dtc/include-prefixes/
     cp -f ${HEADER_SRC} include/
+    # Also copy to parent dts directory as fallback
+    cp -f ${HEADER_SRC} arch/riscv/boot/dts/
 else
      echo "Error: cvi_board_memmap.h not found!"
 fi
