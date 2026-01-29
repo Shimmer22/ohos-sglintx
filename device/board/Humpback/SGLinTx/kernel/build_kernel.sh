@@ -90,8 +90,12 @@ sed -i 's/-mno-ldd//g' arch/riscv/Makefile
 sed -i 's/KBUILD_CFLAGS += -mabi=lp64/KBUILD_CFLAGS += --target=riscv64-linux-ohos -mabi=lp64/g' arch/riscv/Makefile
 sed -i 's/KBUILD_AFLAGS += -mabi=lp64/KBUILD_AFLAGS += --target=riscv64-linux-ohos -mabi=lp64/g' arch/riscv/Makefile
 
-# 8. Strip v0p7 from architecture string (Clang driver rejects it even with LLVM_IAS=0, forcing stripping)
+# 8. Strip v0p7 from architecture string
 sed -i 's/v0p7//g' arch/riscv/Makefile
+
+# 9. Disable linker relaxation (fixes ld.lld R_RISCV_ALIGN error with GCC assembler)
+sed -i 's/KBUILD_CFLAGS += -mabi=lp64/KBUILD_CFLAGS += -mno-relax -mabi=lp64/g' arch/riscv/Makefile
+sed -i 's/KBUILD_AFLAGS += -mabi=lp64/KBUILD_AFLAGS += -mno-relax -mabi=lp64/g' arch/riscv/Makefile
 # -------------------------------------------------------------------
 
 # 2. HDF Patch
