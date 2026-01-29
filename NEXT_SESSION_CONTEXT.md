@@ -49,9 +49,10 @@ We are currently implementing a **"Bypass" Strategy**:
 ## 5. Current State (Files)
 *   **Repository**: All work consolidated and synced in `SGLinTx_Port/`.
 *   **Kernel Build**: **Success**. Produced `Image` and `dtb`.
-*   **Key Fixes**: `Hybrid Bypass` for Vector v0.7, `-Wa,-mno-relax` for Linker Relaxation, `medany` for memory model, and disabled `KALLSYMS` to resolve kallsyms table range errors.
+*   **Image Packaging**: **Success**. Created `package_ohos.sh` and generated `ohos_sglintx.img` using SDK's `genimage`.
+*   **Key Fixes**: `Hybrid Bypass` for Vector v0.7, `-Wa,-mno-relax` for Linker Relaxation, `medany` for memory model, and disabled `KALLSYMS`.
 
 ## 6. Next Steps for Next Session
-1.  **Flash and Boot**: Verify the generated `Image` and `sg2002_licheervnano_sd.dtb` on the physical SGLinTx board.
-2.  **HDF/Driver Patching**: Ongoing verification of HDF driver compilation compatibility (vdec/venc might need similar flag adjustments).
+1.  **Flash and Boot**: Verify the generated `ohos_sglintx.img` (SD card image) on the physical SGLinTx board.
+2.  **HDF/Driver Patching**: Ongoing verification of HDF driver compilation compatibility if needed.
 3.  **Refine kallsyms**: Investigate if kallsyms can be re-enabled without overflow if needed for debugging (likely needs more complex linker script work).

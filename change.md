@@ -88,6 +88,9 @@
     *   **注入 `Hybrid Bypass` 策略**: 剥离 Clang 的 `v0p7` 标志，通过 `-Wa` 传递给汇编器汇编器，解决向量扩展版本冲突。
     *   **禁用了 Linker Relaxation**: 通过 `-Wa,-mno-relax` 解决 `ld.lld` 不支持 GCC 产生的 relocation 问题。
     *   执行 LLVM 交叉编译 (`make ARCH=riscv LLVM=1 ...`)
+*   **[新建] `device/board/Humpback/SGLinTx/kernel/package_ohos.sh`**: 镜像打包脚本，负责：
+    *   收集 `fip.bin`, `Image`, `dtb`, `system.img` 等组件。
+    *   使用 SDK 里的 `genimage` 工具将分散的分区镜像打包成一个完整的 `ohos_sglintx.img` (SD卡全盘镜像)。
 *   **[修改] `device/board/Humpback/SGLinTx/BUILD.gn`**:
     *   添加了 `kernel:kernel` 到 `deps`，确保构建系统自动触发内核编译。
 
@@ -114,5 +117,8 @@
 ## 8. 最终状态
 
 *   **内核构建**: **成功**。
-*   **产物验证**: 已在 `out/SGLinTx/packages/phone/images/` 生成 `Image` (约 10MB) 和 `sg2002_licheervnano_sd.dtb`。
+*   **镜像打包**: **成功**。产出了包含所有分区的全盘镜像 `ohos_sglintx.img`。
+*   **产物验证**:
+    *   分区镜像: `out/SGLinTx/packages/phone/images/`
+    *   全盘镜像: `out/SGLinTx/pack/output/ohos_sglintx.img` (约 3.3GB)。
 *   **系统构建**: **成功**。完整生成了 `system.img`, `vendor.img`, `userdata.img` 等镜像文件。
