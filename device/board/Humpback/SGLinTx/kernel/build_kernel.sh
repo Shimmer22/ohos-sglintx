@@ -85,16 +85,11 @@ sed -i '/subdir-y += thead/d' arch/riscv/boot/dts/Makefile
 
 # 5. Remove GCC-specific flag -mno-ldd not supported by Clang
 sed -i 's/-mno-ldd//g' arch/riscv/Makefile
-# 6. Inject --target=riscv64-linux-ohos for Clang (compiles as x86 otherwise)
+
+# 6. Inject --target=riscv64-linux-ohos for Clang C Compiler
 sed -i 's/KBUILD_CFLAGS += -mabi=lp64/KBUILD_CFLAGS += --target=riscv64-linux-ohos -mabi=lp64/g' arch/riscv/Makefile
 sed -i 's/KBUILD_AFLAGS += -mabi=lp64/KBUILD_AFLAGS += --target=riscv64-linux-ohos -mabi=lp64/g' arch/riscv/Makefile
 
-# 7. Enable experimental extensions for Vector 0.7 (v0p7 requires check disabled)
-sed -i 's/KBUILD_CFLAGS += -march=/KBUILD_CFLAGS += -menable-experimental-extensions -march=/g' arch/riscv/Makefile
-sed -i 's/KBUILD_AFLAGS += -march=/KBUILD_AFLAGS += -menable-experimental-extensions -march=/g' arch/riscv/Makefile
-
-# 8. Strip v0p7 from architecture string (Clang doesn't support it, defaults to v0.10 or fails)
-sed -i 's/v0p7//g' arch/riscv/Makefile
 # -------------------------------------------------------------------
 
 # 2. HDF Patch
@@ -117,16 +112,20 @@ echo "Configuring kernel..."
 mkdir -p arch/riscv/configs
 cp ${KERNEL_CONFIG_FILE} arch/riscv/configs/sglintx_defconfig
 
-# Use LLVM toolchain from OHOS prebuilts
+# Use LLVM toolchain from OHOS prebuilts for C
 CLANG_BASE=${ROOT_DIR}/prebuilts/clang/ohos/linux-x86_64/llvm
 export PATH=${CLANG_BASE}/bin:$PATH
 
+# Use SDK Toolchain for Assembler (LLVM_IAS=0) to support v0.7 vector and legacy syntax
+export CROSS_COMPILE=${ROOT_DIR}/lichee_sdk/host-tools/gcc/riscv64-linux-x86_64/bin/riscv64-unknown-linux-gnu-
+
 # Make defconfig
-make ARCH=riscv LLVM=1 LLVM_IAS=1 O=${KERNEL_OBJ_TMP_PATH} sglintx_defconfig
+# Use LLVM_IAS=0 to force using external GAS assembler
+make ARCH=riscv LLVM=1 LLVM_IAS=0 O=${KERNEL_OBJ_TMP_PATH} sglintx_defconfig
 
 # 5. Build
 echo "Building Image..."
-make ARCH=riscv LLVM=1 LLVM_IAS=1 O=${KERNEL_OBJ_TMP_PATH} -j$(nproc) Image dtbs
+make ARCH=riscv LLVM=1 LLVM_IAS=0 O=${KERNEL_OBJ_TMP_PATH} -j$(nproc) Image dtbs
 
 # 6. Install
 mkdir -p ${OUTPUT_DIR}
