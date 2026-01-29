@@ -99,7 +99,9 @@ sed -i 's/KBUILD_AFLAGS += -mabi=lp64/KBUILD_AFLAGS += -Wa,-mno-relax -mabi=lp64
 
 # 10. Force disable linker relaxation in VDSO Makefile (Critical for ld.lld)
 sed -i 's/ccflags-y := -fno-stack-protector/ccflags-y := -fno-stack-protector -Wa,-mno-relax/g' arch/riscv/kernel/vdso/Makefile
-sed -i 's/asflags-y :=/asflags-y := -Wa,-mno-relax/g' arch/riscv/kernel/vdso/Makefile
+# asflags-y doesn't exist, so append it
+echo "asflags-y += -Wa,-mno-relax" >> arch/riscv/kernel/vdso/Makefile
+# -------------------------------------------------------------------
 # -------------------------------------------------------------------
 # -------------------------------------------------------------------
 
