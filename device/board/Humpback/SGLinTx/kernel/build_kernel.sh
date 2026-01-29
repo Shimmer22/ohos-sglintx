@@ -38,12 +38,16 @@ SDK_BUILD_DIR=${ROOT_DIR}/lichee_sdk/build
 
 # 1. Copy common dtsi files
 if [ -d "${SDK_BUILD_DIR}/boards/default/dts/sg200x" ]; then
+    # Delete broken symlinks first (cp fails otherwise)
+    find ${DTS_CVITEK_DIR} -type l -name "soph_*.dtsi" -delete
     cp -f ${SDK_BUILD_DIR}/boards/default/dts/sg200x/soph_*.dtsi ${DTS_CVITEK_DIR}/
 fi
 
 # 2. Copy the specific board DTS we need
 TARGET_DTS_SRC=${SDK_BUILD_DIR}/boards/sg200x/sg2002_licheervnano_sd/dts_riscv/sg2002_licheervnano_sd.dts
 if [ -f "${TARGET_DTS_SRC}" ]; then
+    # Delete broken symlink first
+    rm -f ${DTS_CVITEK_DIR}/sg2002_licheervnano_sd.dts
     cp -f ${TARGET_DTS_SRC} ${DTS_CVITEK_DIR}/
 else
     echo "Error: Could not find source DTS: ${TARGET_DTS_SRC}"
@@ -53,6 +57,9 @@ fi
 # 3. Remove other broken symlinks to prevent build errors
 # (The makefile builds all *.dts it finds)
 find ${DTS_CVITEK_DIR} -type l -name "*.dts" -delete
+
+# 4. Remove incompatible DTS (thead/ice.dts causes DTC warning treated as error)
+rm -rf arch/riscv/boot/dts/thead
 # -------------------------------------------------------------------
 
 # 2. HDF Patch
