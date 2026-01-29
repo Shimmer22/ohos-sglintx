@@ -8,26 +8,44 @@
   "board": "SGLinTx",
   "enable_ramdisk": true,
   "build_selinux": false,
-  "inherit": [ "productdefine/common/base/standard_system.json" ],
+  "inherit": [
+    "productdefine/common/base/standard_system.json"
+  ],
   "subsystems": [
     {
       "subsystem": "startup",
       "components": [
-        { "component": "init" }
+        {
+          "component": "init"
+        }
       ]
     },
     {
       "subsystem": "hiviewdfx",
       "components": [
-        { "component": "hiviewdfx_hilog_native" },
-        { "component": "hidumper" }
+        {
+          "component": "hiviewdfx_hilog_native"
+        },
+        {
+          "component": "hidumper"
+        }
       ]
     },
     {
-       "subsystem": "developtools",
-       "components": [
-          { "component": "hdc" }
-       ]
+      "subsystem": "developtools",
+      "components": [
+        {
+          "component": "hdc"
+        }
+      ]
+    },
+    {
+      "subsystem": "device_sglintx",
+      "components": [
+        {
+          "component": "device_sglintx"
+        }
+      ]
     }
   ]
 }

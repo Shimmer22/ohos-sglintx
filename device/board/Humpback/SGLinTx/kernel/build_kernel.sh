@@ -12,7 +12,7 @@ PRODUCT_COMPANY=${8}
 
 KERNEL_SRC_TMP_PATH=${ROOT_DIR}/out/kernel/src_tmp/linux-5.10
 KERNEL_OBJ_TMP_PATH=${ROOT_DIR}/out/kernel/OBJ/linux-5.10
-KERNEL_SOURCE=${ROOT_DIR}/kernel/linux/linux-5.10
+KERNEL_SOURCE=${ROOT_DIR}/lichee_sdk/linux_5.10
 KERNEL_PATCH_PATH=${ROOT_DIR}/kernel/linux/patches/linux-5.10
 # SGLinTx specific patch directory (ensure this exists or use logic to check)
 BOARD_PATCH_DIR=${KERNEL_PATCH_PATH}/SGLinTx_patch
@@ -30,6 +30,30 @@ echo "Copying kernel source..."
 cp -arf ${KERNEL_SOURCE}/* ${KERNEL_SRC_TMP_PATH}/
 
 cd ${KERNEL_SRC_TMP_PATH}
+
+# --- Fix broken DTS symlinks (Absolute paths from SDK are invalid) ---
+echo "Fixing DTS symlinks..."
+DTS_CVITEK_DIR=arch/riscv/boot/dts/cvitek
+SDK_BUILD_DIR=${ROOT_DIR}/lichee_sdk/build
+
+# 1. Copy common dtsi files
+if [ -d "${SDK_BUILD_DIR}/boards/default/dts/sg200x" ]; then
+    cp -f ${SDK_BUILD_DIR}/boards/default/dts/sg200x/soph_*.dtsi ${DTS_CVITEK_DIR}/
+fi
+
+# 2. Copy the specific board DTS we need
+TARGET_DTS_SRC=${SDK_BUILD_DIR}/boards/sg200x/sg2002_licheervnano_sd/dts_riscv/sg2002_licheervnano_sd.dts
+if [ -f "${TARGET_DTS_SRC}" ]; then
+    cp -f ${TARGET_DTS_SRC} ${DTS_CVITEK_DIR}/
+else
+    echo "Error: Could not find source DTS: ${TARGET_DTS_SRC}"
+    exit 1
+fi
+
+# 3. Remove other broken symlinks to prevent build errors
+# (The makefile builds all *.dts it finds)
+find ${DTS_CVITEK_DIR} -type l -name "*.dts" -delete
+# -------------------------------------------------------------------
 
 # 2. HDF Patch
 echo "Applying HDF patch..."
@@ -66,7 +90,7 @@ make ARCH=riscv LLVM=1 LLVM_IAS=1 O=${KERNEL_OBJ_TMP_PATH} -j$(nproc) Image dtbs
 mkdir -p ${OUTPUT_DIR}
 cp ${KERNEL_OBJ_TMP_PATH}/arch/riscv/boot/Image ${OUTPUT_DIR}/Image
 # Copy DTB if needed, assume single dtb or copy all
-cp ${KERNEL_OBJ_TMP_PATH}/arch/riscv/boot/dts/sophgo/*.dtb ${OUTPUT_DIR}/ || echo "No DTB found in sophgo, checking dts/"
+cp ${KERNEL_OBJ_TMP_PATH}/arch/riscv/boot/dts/cvitek/*.dtb ${OUTPUT_DIR}/ || echo "No DTB found in cvitek, checking dts/"
 # Check common locations
 if ls ${KERNEL_OBJ_TMP_PATH}/arch/riscv/boot/dts/*.dtb 1> /dev/null 2>&1; then
     cp ${KERNEL_OBJ_TMP_PATH}/arch/riscv/boot/dts/*.dtb ${OUTPUT_DIR}/
