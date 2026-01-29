@@ -56,16 +56,19 @@ fi
 
 # 2.1 Copy required header for DTS
 HEADER_SRC=${ROOT_DIR}/lichee_sdk/linux_5.10/scripts/dtc/include-prefixes/cvi_board_memmap.h
+# Fallback location
+if [ ! -f "${HEADER_SRC}" ]; then
+    HEADER_SRC=${ROOT_DIR}/lichee_sdk/u-boot-2021.10/include/cvi_board_memmap.h
+fi
+
 if [ -f "${HEADER_SRC}" ]; then
     cp -f ${HEADER_SRC} ${DTS_CVITEK_DIR}/
+    # Also copy to standard include paths where DTC looks
+    mkdir -p scripts/dtc/include-prefixes
+    cp -f ${HEADER_SRC} scripts/dtc/include-prefixes/
+    cp -f ${HEADER_SRC} include/
 else
-    echo "Warning: Could not find cvi_board_memmap.h in ${HEADER_SRC}, checking u-boot location..."
-    HEADER_SRC_UBOOT=${ROOT_DIR}/lichee_sdk/u-boot-2021.10/include/cvi_board_memmap.h
-    if [ -f "${HEADER_SRC_UBOOT}" ]; then
-        cp -f ${HEADER_SRC_UBOOT} ${DTS_CVITEK_DIR}/
-    else
-         echo "Error: cvi_board_memmap.h not found!"
-    fi
+     echo "Error: cvi_board_memmap.h not found!"
 fi
 
 # 3. Remove other broken symlinks to prevent build errors
