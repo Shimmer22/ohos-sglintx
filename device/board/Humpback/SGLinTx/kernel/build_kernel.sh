@@ -92,6 +92,9 @@ sed -i 's/KBUILD_AFLAGS += -mabi=lp64/KBUILD_AFLAGS += --target=riscv64-linux-oh
 # 7. Enable experimental extensions for Vector 0.7 (v0p7 requires check disabled)
 sed -i 's/KBUILD_CFLAGS += -march=/KBUILD_CFLAGS += -menable-experimental-extensions -march=/g' arch/riscv/Makefile
 sed -i 's/KBUILD_AFLAGS += -march=/KBUILD_AFLAGS += -menable-experimental-extensions -march=/g' arch/riscv/Makefile
+
+# 8. Strip v0p7 from architecture string (Clang doesn't support it, defaults to v0.10 or fails)
+sed -i 's/v0p7//g' arch/riscv/Makefile
 # -------------------------------------------------------------------
 
 # 2. HDF Patch
