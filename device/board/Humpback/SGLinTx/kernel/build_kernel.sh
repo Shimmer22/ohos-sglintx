@@ -54,12 +54,28 @@ else
     exit 1
 fi
 
+# 2.1 Copy required header for DTS
+HEADER_SRC=${ROOT_DIR}/lichee_sdk/linux_5.10/scripts/dtc/include-prefixes/cvi_board_memmap.h
+if [ -f "${HEADER_SRC}" ]; then
+    cp -f ${HEADER_SRC} ${DTS_CVITEK_DIR}/
+else
+    echo "Warning: Could not find cvi_board_memmap.h in ${HEADER_SRC}, checking u-boot location..."
+    HEADER_SRC_UBOOT=${ROOT_DIR}/lichee_sdk/u-boot-2021.10/include/cvi_board_memmap.h
+    if [ -f "${HEADER_SRC_UBOOT}" ]; then
+        cp -f ${HEADER_SRC_UBOOT} ${DTS_CVITEK_DIR}/
+    else
+         echo "Error: cvi_board_memmap.h not found!"
+    fi
+fi
+
 # 3. Remove other broken symlinks to prevent build errors
 # (The makefile builds all *.dts it finds)
 find ${DTS_CVITEK_DIR} -type l -name "*.dts" -delete
 
 # 4. Remove incompatible DTS (thead/ice.dts causes DTC warning treated as error)
+# and remove it from Makefile to prevent "No rule to make target" error
 rm -rf arch/riscv/boot/dts/thead
+sed -i '/subdir-y += thead/d' arch/riscv/boot/dts/Makefile
 # -------------------------------------------------------------------
 
 # 2. HDF Patch
