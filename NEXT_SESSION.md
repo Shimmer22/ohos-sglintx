@@ -1,7 +1,7 @@
 # OpenHarmony SGLinTx 移植项目 - 下一步行动指南
 
 **最后更新**: 2026-02-01  
-**当前状态**: U-Boot 成功启动，FIT 配置节点待修复
+**当前状态**: ✅ 内核成功启动，❌ Console 输出待修复
 
 ---
 
@@ -18,31 +18,45 @@
 
 ### 当前进度
 - ✅ 系统编译成功
-- ✅ 内核构建成功
+- ✅ 内核构建成功 (Linux 5.10.4)
 - ✅ 镜像打包完成
 - ✅ BootROM → FSBL → U-Boot 启动链成功
-- ⚠️ **FIT 内核加载失败** (配置节点不匹配)
+- ✅ **FIT 配置节点已修复** (`config-1` → `config@1`)
+- ✅ **FAT BPB 参数已修复** (16MB, sectors/cluster=4)
+- ✅ **内核成功加载并跳转** ("Starting kernel ...")
+- ❌ **内核 Console 无输出** - 待调查 DTB 和 bootargs 传递
 
 ---
 
-## 🔍 问题背景
+## 🎯 历史问题汇总
 
-### 已解决的问题
+### 1. 汇编器指令集冲突 (✅ 已解决)
+   - Clang 不支持 RISC-V Vector 0.7
+   - **解决**: 使用 GCC 汇编器，透传 `-march=rv64imafdcv0p7`
 
-1. **内核编译问题**
-   - Clang 不支持 RISC-V `-mmedany` 代码模型
-   - **解决**: 使用 GCC 工具链编译内核
+### 2. 链接器重定位错误 (✅ 已解决)
+   - ld.lld 不支持 relaxation
+   - **解决**: 注入 `-Wa,-mno-relax`，禁用 `CONFIG_KALLSYMS`
 
-2. **内核链接问题**
-   - `CONFIG_KALLSYMS` 导致符号地址超出 32 位范围
-   - **解决**: 禁用 KALLSYMS
-
-3. **启动黑屏问题**
+### 3. 启动黑屏问题 (✅ 已解决)
    - Boot 分区缺少 vendor marker 文件
    - FAT 文件系统被手动修改破坏
    - **解决**: 提取 vendor 的 9 个 marker 文件，使用 genimage 正确参数
 
-### 当前问题
+### 4. FIT 配置节点不匹配 (✅ 已解决 - 2026-02-01)
+   - FIT 配置使用 `config-1`，但 U-Boot 查找 `config@1`
+   - **解决**: 修改为 `config@1` 格式
+
+### 5. FAT 文件系统参数错误 (✅ 已解决 - 2026-02-01)
+   - mkdosfs 参数理解错误：`-s 32` 导致簇太大
+   - Block number 溢出：`0x100000041 exceeds max`
+   - **解决**: 改用 `-s 4 -R 4`，boot 分区改为 16MB
+
+---
+
+## 🎉 今日解决的关键问题 (2026-02-01)
+
+### 问题 1: FIT 配置节点不匹配
 
 **现象**:
 ```
@@ -51,277 +65,170 @@ Could not find configuration node
 ERROR: can't get kernel image!
 ```
 
-**原因**: FIT 配置节点命名不匹配
+**根本原因**: 
 - 官方 boot.sd 使用: `config@1`
-- OHOS boot.sd 使用: `config-1`
+- OHOS boot.sd 错误使用: `config-1`
+- U-Boot distro boot 脚本硬编码查找 `@` 格式
 
----
-
-## 🎯 需要的修改
-
-### 文件位置
-```
-/home/shimmer/ohos_source/SGLinTx_Port/device/board/Humpback/SGLinTx/kernel/package_ohos.sh
-```
-
-### 具体修改
-
-**第 84-92 行**，当前代码:
+**解决方案**: 
+修改 `package_ohos.sh` 第 85-86 行：
 ```bash
 configurations {
-    default = "config-1";
-    config-1 {
-        description = "Boot Configuration";
+    default = "config@1";  # 从 config-1 改为 config@1
+    config@1 {             # 从 config-1 改为 config@1
         kernel = "kernel";
-        ramdisk = "ramdisk";
         fdt = "fdt";
+        ramdisk = "ramdisk";
     };
 };
 ```
 
-**改为**:
-```bash
-configurations {
-    default = "config@1";
-    config@1 {
-        description = "Boot Configuration";
-        kernel = "kernel";
-        ramdisk = "ramdisk";
-        fdt = "fdt";
-    };
-};
+### 问题 2: FAT 文件系统参数导致 U-Boot 读取失败
+
+**现象**:
+```
+MMC: block number 0x100000041 exceeds max(0x3b72400)
+Invalid FAT entry
+** Unable to read file boot.sd **
 ```
 
-**关键点**: 将连字符 `-` 改为 `@` 符号
+**诊断过程**:
+1. 缩小 boot 分区从 128MB 到 16MB 后仍无法启动
+2. U-Boot 计算文件位置时地址溢出（4GB+）
+3. 发现 BPB 参数异常：sectors per cluster = 32
+
+**根本原因**: mkdosfs 参数理解错误
+```bash
+# ❌ 错误理解
+-h 2    # 以为是 Heads=2
+-s 32   # 以为是 Sectors per track=32
+
+# ✅ 实际含义  
+-h 2    # Hidden sectors = 2
+-s 32   # Sectors per CLUSTER = 32  ← 导致簇太大，地址计算溢出
+```
+
+**Vendor 实际配置**:
+- Boot 分区：16MB
+- Sectors per cluster: 4
+- Reserved sectors: 4
+- FAT type: FAT16
+
+**解决方案**:
+```bash
+# package_ohos.sh 第 147-148 行
+extraargs = "-F 16 -s 4 -R 4"  # 簇大小4，保留扇区4
+size = 16M                      # 16MB (匹配 vendor)
+```
+
+**关键教训**:
+1. mkdosfs `-s` 设置的是**簇大小** (sectors per cluster)，不是磁盘 geometry
+2. Geometry 参数 (heads, sectors per track) 由 FAT 根据分区大小自动计算
+3. Boot 分区大小必须严格匹配 vendor (16MB)
 
 ---
 
-## 🔧 操作步骤
+## ❌ 当前待解决问题
 
-### 1. 修改配置节点
+### 内核 Console 静默
 
-```bash
-cd /home/shimmer/ohos_source/SGLinTx_Port
-vim device/board/Humpback/SGLinTx/kernel/package_ohos.sh
-# 修改第 84 和 86 行，将 config-1 改为 config@1
+**启动日志**:
 ```
-
-### 2. 同步到 Docker
-
-```bash
-cd /home/shimmer/ohos_source
-./deploy_to_docker.sh
-```
-
-### 3. 重新打包镜像
-
-```bash
-docker exec -it ohos_build_env bash
-cd /home/openharmony
-rm -rf /home/openharmony/out/SGLinTx/pack/output/*
-bash device/board/Humpback/SGLinTx/kernel/package_ohos.sh
-```
-
-### 4. 验证修改
-
-```bash
-# 在 Docker 中
-dd if=/home/openharmony/out/SGLinTx/pack/output/ohos_sglintx.img bs=512 skip=1 count=32768 of=/tmp/check_boot.vfat 2>/dev/null
-mcopy -i /tmp/check_boot.vfat ::boot.sd /tmp/boot_new.sd
-mkimage -l /tmp/boot_new.sd | grep -A3 "Configuration"
-# 应该看到 "Config 0 (config@1)"
-```
-
-### 5. 烧录测试
-
-```bash
-# 复制到主机
-docker cp ohos_build_env:/home/openharmony/out/SGLinTx/pack/output/ohos_sglintx.img /home/shimmer/ohos_source/out/SGLinTx/pack/output/
-
-# Windows 使用 Rufus, Linux 使用 dd
-sudo dd if=ohos_sglintx.img of=/dev/sdX bs=4M status=progress
-```
-
-### 6. 串口监控
-
-```bash
-# 波特率: 115200, 8N1
-sudo picocom /dev/ttyUSB0 -b 115200
-# 或
-sudo minicom -D /dev/ttyUSB0 -b 115200
-```
-
----
-
-## 📁 重要文件说明
-
-### 项目结构
-```
-SGLinTx_Port/
-├── device/board/Humpback/SGLinTx/
-│   └── kernel/
-│       ├── build_kernel.sh          # 内核编译脚本
-│       ├── package_ohos.sh          # 镜像打包脚本 ⭐ 需要修改
-│       ├── BUILD.gn                 # GN 构建配置
-│       └── configs/
-│           └── sg2002_licheervnano_sd_defconfig  # 内核配置
-├── vendor/Humpback/SGLinTx/
-│   └── config.json                  # 产品配置
-├── change.md                        # 完整的修改记录 ⭐ 必读
-├── README.md                        # 项目说明
-└── verify_ohos_image.sh             # 镜像验证工具
-```
-
-### 必读文档
-1. **`change.md`** - 记录了所有技术细节和修改历史
-2. **`device/board/Humpback/SGLinTx/kernel/package_ohos.sh`** - 核心打包脚本
-
-### 关键代码段
-
-**package_ohos.sh 结构**:
-- **Line 25-103**: FIT 镜像生成（ITS 文件定义）
-- **Line 106-135**: Vendor marker 文件提取
-- **Line 137-187**: genimage 配置生成
-
----
-
-## 🐛 已知问题和注意事项
-
-### ⚠️ 绝对不要做的事
-
-1. **不要手动修改 FAT BPB 参数**
-   - 会破坏文件系统，导致 fip.bin 无法加载
-   - 使用 genimage 的 `extraargs` 参数
-
-2. **不要删除 Boot 分区的 marker 文件**
-   ```
-   usb.dev, usb.ncm, usb.rndis, wifi.sta, gt9xx, logo.jpeg, ver
-   ```
-   - U-Boot 依赖这些文件检测硬件配置
-
-3. **不要使用 Clang 编译内核**
-   - RISC-V 内核必须用 GCC
-
-### ✅ 最佳实践
-
-1. **每次修改后运行验证脚本**:
-   ```bash
-   cd /home/openharmony
-   ./SGLinTx_Port/verify_ohos_image.sh
-   ```
-
-2. **保持 fip.bin 与 vendor 一致**:
-   ```bash
-   sha256sum lichee_sdk/install/soc_sg2002_licheervnano_sd/fip.bin
-   # 应该是: ec515da1bed75915727e0126fc5ba9b62156425412d39fd900f5d93419b43633
-   ```
-
-3. **使用官方 vendor 镜像作为参考**:
-   ```bash
-   lichee_sdk/install/soc_sg2002_licheervnano_sd/images/2026-01-21-18-59-f3639b.img
-   ```
-
----
-
-## 📊 预期启动日志
-
-### 成功启动应该看到
-
-```
-[乱码 - BootROM]
-U-Boot 2021.10 (xxx) soph
-DRAM:  254 MiB
-MMC:   cv-sd@4310000: 0, wifi-sd@4320000: 1
-Loading Environment from nowhere... OK
-...
-Boot from SD dev 0 ...
-12079500 bytes read in 1068 ms
 ## Loading kernel from FIT Image at 81800000 ...
-   Using 'config@1' configuration          ← 这里应该成功
-   Trying 'kernel' kernel subimage
-     Description:  RISC-V OpenHarmony Kernel
-     Load Address: 0x80200000
-     Entry Point:  0x80200000
-   Verifying Hash Integrity ... crc32+ sha256+ OK
-## Flattened Device Tree blob at 82000000
-Starting kernel ...
+   Using 'config@1' configuration          ✅ 配置正确
+   Verifying Hash Integrity ... crc32+ OK  ✅ 内核校验通过
+## Loading ramdisk from FIT Image ...
+   Verifying Hash Integrity ... crc32+ OK  ✅ Ramdisk 校验通过
+## Loading fdt from FIT Image ...
+   Verifying Hash Integrity ... sha256+ OK ✅ DTB 校验通过
 
-[    0.000000] Linux version 5.10.x-ohos ...
-[    0.000000] Machine model: Sophgo LicheeRV Nano
-...
+Starting kernel ...
+← 卡在这里，无任何输出
 ```
 
----
+**已尝试的方案**:
+1. ✗ U-Boot 手动设置 bootargs: `console=ttyS0,115200 root=/dev/mmcblk0p2`
+2. ✗ 修改设备树源文件添加 chosen/bootargs (编译未生效)
 
-## 🔬 调试技巧
+**可能原因分析**:
+1. **DTB chosen 节点为空**: 覆盖了 U-Boot 传递的 bootargs
+2. **DTB 编译流程问题**: 修改的 DTS 文件未被实际编译使用
+3. **Console 驱动配置**: 内核 defconfig 中可能缺少必要配置
 
-### 如果修改后还是失败
-
-1. **检查 FIT 镜像内容**:
-   ```bash
-   mkimage -l /tmp/boot.sd | grep -i config
-   ```
-
-2. **对比官方 boot.sd**:
-   ```bash
-   mcopy -i /tmp/vendor_boot.vfat ::boot.sd /tmp/vendor_boot.sd
-   mkimage -l /tmp/vendor_boot.sd > vendor.txt
-   mkimage -l /tmp/ohos_boot.sd > ohos.txt
-   diff -u vendor.txt ohos.txt
-   ```
-
-3. **U-Boot 手动加载测试**:
-   ```
-   # 在 U-Boot 提示符 soph#
-   fatload mmc 0:1 0x81800000 boot.sd
-   iminfo 0x81800000
-   bootm 0x81800000
-   ```
-
-### 串口无输出排查
-
-1. 检查波特率: **115200** baud
-2. 检查连线: TX ↔ RX, GND ↔ GND
-3. 检查 SD 卡: 重新烧录
-4. 检查电源: 5V/2A 供电
+**下一步调查方向**:
+1. 提取并对比 OHOS DTB vs Vendor DTB 的 chosen 节点
+2. 研究 OHOS 内核构建系统的 DTB 编译路径
+3. 检查 Vendor 如何传递 bootargs（U-Boot 环境变量？FIT 镜像？）
+4. 考虑通过 U-Boot boot 脚本注入 bootargs
 
 ---
 
-## 📞 技术支持资源
+## 📝 镜像信息
 
-### 参考文档
-- OpenHarmony 官方文档: https://gitee.com/openharmony
-- SG2002 数据手册: lichee_sdk/docs/
-- U-Boot FIT 格式: https://u-boot.readthedocs.io/
+### 当前镜像
+- **路径**: `/home/openharmony/out/SGLinTx/pack/output/ohos_sglintx.img` (Docker 内)
+- **大小**: 3.14 GB
+- **日期**: 2026-02-01
 
-### 相关仓库
-- 芯片厂商 SDK: `lichee_sdk/`
-- OHOS kernel: `kernel/linux/linux-5.10/`
-- 设备配置: `SGLinTx_Port/device/`
+### 分区布局
+| 分区 | 大小 | 类型 | 说明 |
+|------|------|------|------|
+| boot | 16 MB | FAT16 | fip.bin + boot.sd + 7个marker文件 |
+| system | 1.5 GB | EXT4 | OpenHarmony 系统分区 |
+| vendor | 256 MB | EXT4 | Vendor 组件 |
+| userdata | 1.4 GB | EXT4 | 用户数据 |
 
----
-
-## 🎓 技术要点总结
-
-1. **SG2002 启动流程**: BootROM → FSBL → OpenSBI → U-Boot → Kernel
-2. **FIT 镜像必需**: 包含 Kernel + FDT + Ramdisk，配置节点指定引导方式
-3. **Boot marker 文件**: usb.*, wifi.sta, gt9xx 等用于硬件检测
-4. **FAT 几何参数**: Heads=2, Sectors=32, FAT16
-5. **波特率**: BootROM 乱码正常，U-Boot/Linux 使用 115200
-
----
-
-## ✅ 成功标准
-
-修复完成后，应该满足:
-- ✅ U-Boot 找到 `config@1` 配置节点
-- ✅ FIT 镜像 Hash 校验通过
-- ✅ 内核成功加载到 0x80200000
-- ✅ Linux 内核输出 boot log
-- ✅ OpenHarmony init 系统启动
+### Boot 分区文件清单
+1. `fip.bin` (431 KB) - FSBL + OpenSBI + U-Boot SPL
+2. `boot.sd` (11.5 MB) - FIT 镜像（kernel + ramdisk + dtb）
+3. `usb.dev`, `usb.ncm`, `usb.rndis` - USB 模式标记
+4. `wifi.sta` - WiFi 配置
+5. `gt9xx` - 触摸屏标记
+6. `logo.jpeg` (3.5 KB) - 启动 Logo
+7. `ver` - 版本信息
 
 ---
 
-**祝移植成功！🚀**
+## 📚 技术要点总结
 
-如有问题，请查阅 `change.md` 获取详细的技术背景和历史修改记录。
+### RISC-V 编译链
+- 使用 LLVM/Clang 主编译器
+- GCC 汇编器处理 Vector v0.7 指令
+- 关闭 Linker Relaxation (`-mno-relax`)
+- 使用 `CMODEL_MEDANY` 支持大地址空间
+
+### FIT 镜像关键点
+- 配置节点必须使用 `config@N` 格式（不是 `config-N`）
+- 必须匹配 U-Boot distro boot 脚本预期
+- 包含 kernel、ramdisk、dtb 三个组件
+
+### Boot 分区配置
+- **大小**: 16MB (严格匹配 vendor)
+- **FAT 类型**: FAT16
+- **Sectors per cluster**: 4
+- **Reserved sectors**: 4
+- ⚠️ mkdosfs `-s` 参数设置**簇大小**，不是 sectors per track
+
+### 启动流程
+1. BootROM (乱码正常，内部 loader)
+2. FSBL (fip.bin，DDR 初始化)
+3. OpenSBI (RISC-V supervisor binary interface)
+4. U-Boot SPL → U-Boot proper
+5. 加载 FIT 镜像 (boot.sd)
+6. 跳转到 Linux kernel @ 0x80200000
+
+---
+
+## 🔗 相关文档
+
+- **`change.md`** - 完整的修改记录和技术细节 (必读)
+- **`NEXT_SESSION_CONTEXT.md`** - 详细的问题诊断过程
+- **`device/board/Humpback/SGLinTx/kernel/`** - 核心构建脚本目录
+  - `build_kernel.sh` - 内核编译
+  - `package_ohos.sh` - 镜像打包
+
+---
+
+## 联系与支持
+
+如有问题，请参考 `change.md` 中的详细技术说明。

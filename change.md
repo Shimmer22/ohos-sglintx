@@ -264,39 +264,122 @@ ERROR: can't get kernel image!
 **问题分析**:
 - 官方 boot.sd 使用 `config@1` 节点名
 - OHOS boot.sd 使用 `config-1` 节点名
-- U-Boot 的 distro boot 脚本可能硬编码查找特定节点名
+- U-Boot 的 distro boot 脚本硬编码查找 `config@1` 格式
 
-**下一步**: 调整 ITS 文件的 configuration 节点命名以匹配官方格式
+**修复** (2026-02-01):
+修改 `package_ohos.sh` 第 85-86 行，将配置节点命名改为 `@` 格式：
+```bash
+configurations {
+    default = "config@1";
+    config@1 {
+        description = "Boot Configuration";
+        kernel = "kernel";
+        fdt = "fdt";
+        ramdisk = "ramdisk";
+    };
+};
+```
+
+### 8.4 FAT 文件系统参数修复 (2026-02-01)
+
+**问题 1**: Boot 分区从 128MB 缩减为 16MB 后 U-Boot 仍无法启动
+
+**诊断**:
+- Block number 溢出: `MMC: block number 0x100000041 exceeds max`
+- 原因：mkdosfs参数理解错误
+
+**关键发现**:
+```bash
+# ❌ 错误理解
+-h 2    # 以为是 Heads=2
+-s 32   # 以为是 Sectors per track=32
+
+# ✅ 实际含义  
+-h 2    # Hidden sectors = 2
+-s 32   # Sectors per CLUSTER = 32  ← 这导致簇太大，地址溢出
+```
+
+**Vendor 实际参数**:
+```
+Boot 分区大小: 16MB
+Sectors per cluster: 4
+Reserved sectors: 4
+FAT 类型: FAT16
+```
+
+**最终修复**:
+```bash
+# package_ohos.sh 第 147 行
+extraargs = "-F 16 -s 4 -R 4"
+size = 16M
+```
+
+**技术要点**:
+1. mkdosfs `-s` 设置的是**簇大小**，不是磁盘几何参数
+2. 磁盘 geometry (heads, sectors per track) 由 FAT 自动计算
+3. Boot 分区大小必须与 vendor 完全一致（16MB），否则 FAT 参数不匹配
 
 ---
 
-## 9. 最终状态
+## 9. 当前状态 (2026-02-01 更新)
 
 ### 系统构建: ✅ **成功**
-- 内核编译: 通过 (RISC-V 64位)
-- 系统镜像: 生成完整 (system.img, vendor.img, userdata.img)
-- Boot 镜像: FIT 格式正确生成
+- 内核编译: 通过 (RISC-V 64位, v5.10.4)
+- 系统镜像: 生成完整 (system.img, vendor.img, userdata.img, ramdisk.img)
+- Boot 镜像: FIT 格式正确，配置节点匹配
 
-### 启动进度: 🟡 **部分成功**
+### 启动进度: 🟡 **内核加载成功，Console 待修复**
 - ✅ BootROM → FSBL → OpenSBI
-- ✅ U-Boot 启动并初始化
+- ✅ U-Boot 启动并初始化 (DRAM: 254 MiB)
 - ✅ Boot 分区识别和文件读取
-- ❌ FIT 内核加载 (配置节点名称不匹配)
+- ✅ FIT 内核加载成功 (`Using 'config@1' configuration`)
+- ✅ 内核、Ramdisk、DTB Hash 校验通过
+- ✅ **"Starting kernel ..."** - 内核已跳转
+- ❌ **内核 console 无输出** - bootargs/chosen 节点配置问题
 
 ### 镜像信息
 - **路径**: `out/SGLinTx/pack/output/ohos_sglintx.img`
-- **大小**: 3.3 GB
+- **大小**: 3.14 GB
 - **分区**:
-  - Boot: 128 MB (FAT16, 包含 9 个文件)
+  - Boot: **16 MB** (FAT16, 包含 9 个文件, Sectors/cluster=4)
   - System: 1.5 GB (EXT4)
   - Vendor: 256 MB (EXT4)
   - Userdata: 1.4 GB (EXT4)
 
+### 待解决问题
+
+#### 内核 Console 静默
+**现象**: 
+- 内核成功跳转 ("Starting kernel ...")
+- 之后无任何串口输出
+- 设置 U-Boot bootargs 无效
+
+**可能原因**:
+1. DTB chosen 节点为空，覆盖了 U-Boot 的 bootargs
+2. DTB 编译流程问题 - 设备树源文件修改未生效
+3. 内核 console 驱动相关配置缺失
+
+**尝试过的方案**:
+- ✗ U-Boot 手动设置 `console=ttyS0,115200 root=/dev/mmcblk0p2`
+- ✗ 修改设备树源文件添加 chosen/bootargs (编译未生效)
+
+**下一步调查**:
+1. 研究 OHOS 内核构建系统的 DTB 编译流程
+2. 对比 vendor DTB 和 OHOS DTB 的 chosen 节点
+3. 考虑通过 U-Boot 脚本传递 bootargs
+
 ### 技术要点总结
 
-1. **RISC-V 编译链**: Clang 不支持 `-mmedany`，需使用 GCC
-2. **Kernel 链接**: 关闭 `CONFIG_KALLSYMS` 避免超限
-3. **FIT 镜像**: 必须用于 SG2002 芯片启动
-4. **Boot 标记文件**: U-Boot 环境检测必需
-5. **FAT 文件系统**: 不要事后手动修改 BPB，使用 genimage 参数
-6. **波特率**: BootROM 乱码正常，U-Boot/Linux 使用 115200 baud
+1. **RISC-V 编译链**: 使用 LLVM/Clang，需处理 Vector v0p7 和 Linker Relaxation
+2. **Kernel 链接**: 关闭 `CONFIG_KALLSYMS` 避免超限，使用 `CMODEL_MEDANY`
+3. **FIT 镜像**: 
+   - 配置节点必须使用 `config@N` 格式（不是 `config-N`）
+   - 必须匹配 U-Boot 的 distro boot 脚本预期
+4. **Boot 分区配置**:
+   - 大小：16MB (与 vendor 完全一致)
+   - FAT16: sectors per cluster = 4, reserved = 4
+   - ⚠️ mkdosfs `-s` 参数设置**簇大小**，不是 sectors per track
+5. **Boot 标记文件**: U-Boot 环境检测必需（9个文件）
+6. **FAT 文件系统**: 使用 genimage extraargs 正确配置，不要事后手动修改
+7. **波特率**: BootROM 乱码正常，U-Boot/Linux 使用 115200 baud
+

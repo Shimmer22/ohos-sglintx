@@ -34,8 +34,8 @@ cat > ${PACK_DIR}/input/ohos_boot.its <<'ITS_EOF'
     #address-cells = <1>;
 
     images {
-        kernel {
-            description = "RISC-V OpenHarmony Kernel";
+        kernel-1 {
+            description = "cvitek kernel";
             data = /incbin/("Image");
             type = "kernel";
             arch = "riscv";
@@ -46,27 +46,21 @@ cat > ${PACK_DIR}/input/ohos_boot.its <<'ITS_EOF'
             hash-1 {
                 algo = "crc32";
             };
-            hash-2 {
-                algo = "sha256";
-            };
         };
 
-        fdt {
-            description = "SG2002 LicheeRV Nano Device Tree";
+        fdt-sg2002_licheervnano_sd {
+            description = "cvitek device tree - sg2002_licheervnano_sd";
             data = /incbin/("sg2002_licheervnano_sd.dtb");
             type = "flat_dt";
             arch = "riscv";
             compression = "none";
             hash-1 {
-                algo = "crc32";
-            };
-            hash-2 {
                 algo = "sha256";
             };
         };
 
-        ramdisk {
-            description = "OpenHarmony Initial Ramdisk";
+        ramdisk-1 {
+            description = "cvitek ramdisk";
             data = /incbin/("ramdisk.img");
             type = "ramdisk";
             arch = "riscv";
@@ -75,19 +69,16 @@ cat > ${PACK_DIR}/input/ohos_boot.its <<'ITS_EOF'
             hash-1 {
                 algo = "crc32";
             };
-            hash-2 {
-                algo = "sha256";
-            };
         };
     };
 
     configurations {
-        default = "config-1";
-        config-1 {
-            description = "Boot Configuration";
-            kernel = "kernel";
-            fdt = "fdt";
-            ramdisk = "ramdisk";
+        default = "config-sg2002_licheervnano_sd";
+        config-sg2002_licheervnano_sd {
+            description = "boot cvitek system with board sg2002_licheervnano_sd";
+            kernel = "kernel-1";
+            fdt = "fdt-sg2002_licheervnano_sd";
+            ramdisk = "ramdisk-1";
         };
     };
 };
@@ -151,10 +142,11 @@ image boot.vfat {
             "logo.jpeg",
             "ver"
         }
-        # Match vendor FAT geometry: Heads=2, Sectors=32, FAT16
-        extraargs = "-F 16 -h 2 -s 32"
+        # Match vendor FAT parameters EXACTLY: sectors-per-cluster=4, reserved=4, FAT16
+        # NOTE: mkdosfs -s sets CLUSTER size, -R sets reserved sectors
+        extraargs = "-F 16 -s 4 -R 4"
     }
-    size = 128M
+    size = 16M  # CRITICAL: Match vendor size exactly for proper FAT geometry
 }
 
 image ohos_sglintx.img {
