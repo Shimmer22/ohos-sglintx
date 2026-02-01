@@ -383,3 +383,38 @@ size = 16M
 6. **FAT 文件系统**: 使用 genimage extraargs 正确配置，不要事后手动修改
 7. **波特率**: BootROM 乱码正常，U-Boot/Linux 使用 115200 baud
 
+
+## 10. 内核启动调试记录 (2026-02-01)
+
+### 10.1 问题描述
+系统烧录后，U-Boot 成功跳转内核 ("Starting kernel ...") 但随后完全静默，无任何串口输出。
+
+### 10.2 调试尝试与发现
+
+#### 尝试 A: 修复 Console 配置
+*   **诊断**: 反编译 DTB 发现  节点缺失 。
+*   **操作**: 应用 ，强制添加 。
+*   **结果**: DTB 确认已修复，但内核依然静默。推测内核在 Console 初始化前已 Crash。
+
+#### 尝试 B: Kernel Binary 分析 (Crash 调查)
+*   **发现**: 
+    *   Vendor Kernel:  显示链接地址为  (2MB Offset)。
+    *   OHOS Kernel:  显示链接地址为  (4MB Offset)。
+    *   **冲突**:  和 Bootloader 均假设内核加载于 2MB 处，导致 OHOS Kernel 被加载到 2MB 但代码逻辑认为在 4MB，MMU 开启即 Crash。
+*   **根本原因**:  中  定义依赖 。在 OHOS 构建环境中，该宏未正确识别，导致回退到 32-bit 的  偏移。
+*   **操作**: 创建  强制  为 。
+*   **结果**: 用户反馈依然失败。说明仅仅修改偏移可能不足以解决所有 ABI/Config 差异 (如 Vector Extension 状态)。
+
+#### 尝试 C: 隔离测试 (Golden Sample)
+*   **操作**: 修改 ，**直接打包 Lichee SDK 编译好的 Vendor Kernel** ()。
+*   **结果**: **启动成功！**
+    *   日志显示:  ->  -> 
+*   **重要结论**:
+    1.  **打包流程验证无误**: 、分区表、、生成逻辑完全正确。
+    2.  **问题锁定**: 唯一的问题源是 **OHOS 编译环境下的 Kernel产物**。
+    3.  **下一步方向**: 需深度对比 Vendor 和 OHOS 的内核编译选项 () 和 编译器行为 (Vector ABI)，而不再是打包脚本。
+
+### 10.3 当前状态
+*   已回滚所有临时 Patch (, )。
+*    已恢复为打包 OHOS Kernel。
+*   待解决：通过对比  彻底修复 OHOS Kernel 的编译配置。
