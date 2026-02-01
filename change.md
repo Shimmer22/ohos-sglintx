@@ -114,11 +114,189 @@
 *   **现象**: 即使开启 `medany`，`kallsyms` 相关符号仍报寻址超限。
 *   **修复**: 在 `defconfig` 中通过 `CONFIG_KALLSYMS=n` 暂时禁用该功能以绕过链接死锁，优先产出可引导镜像。
 
-## 8. 最终状态
+## 8. 启动修复 (Boot Fixes)
 
-*   **内核构建**: **成功**。
-*   **镜像打包**: **成功**。产出了包含所有分区的全盘镜像 `ohos_sglintx.img`。
-*   **产物验证**:
-    *   分区镜像: `out/SGLinTx/packages/phone/images/`
-    *   全盘镜像: `out/SGLinTx/pack/output/ohos_sglintx.img` (约 3.3GB)。
-*   **系统构建**: **成功**。完整生成了 `system.img`, `vendor.img`, `userdata.img` 等镜像文件。
+### 8.1 问题诊断
+
+**初始现象**：OHOS 镜像烧录后无串口输出，无法启动
+
+#### 诊断过程
+
+1. **对比分析**
+   - 官方镜像：BootROM 乱码 → U-Boot (115200 baud) → 内核启动
+   - OHOS 镜像：BootROM 乱码较短 → 无输出 → Watchdog 重启循环
+
+2. **定位问题**
+   - fip.bin 版本正确（SHA256 与官方完全一致）
+   - Boot 分区文件缺失（缺少 U-Boot 环境检测所需的标记文件）
+   - 手动修改 FAT BPB 破坏文件系统导致 fip.bin 无法加载
+
+### 8.2 修复措施
+
+#### A. 添加 Vendor Boot Marker 文件
+
+**修改文件**: `device/board/Humpback/SGLinTx/kernel/package_ohos.sh`
+
+**添加内容**:
+```bash
+# 从厂家镜像提取标记文件
+VENDOR_IMG="${VENDOR_BOOT_FILES}/images/2026-01-21-18-59-f3639b.img"
+dd if=${VENDOR_IMG} bs=512 skip=1 count=32768 of=${PACK_DIR}/tmp_extract/boot.vfat
+mcopy -i ${PACK_DIR}/tmp_extract/boot.vfat ::usb.dev ${PACK_DIR}/input/
+mcopy -i ${PACK_DIR}/tmp_extract/boot.vfat ::usb.ncm ${PACK_DIR}/input/
+mcopy -i ${PACK_DIR}/tmp_extract/boot.vfat ::usb.rndis ${PACK_DIR}/input/
+mcopy -i ${PACK_DIR}/tmp_extract/boot.vfat ::wifi.sta ${PACK_DIR}/input/
+mcopy -i ${PACK_DIR}/tmp_extract/boot.vfat ::gt9xx ${PACK_DIR}/input/
+mcopy -i ${PACK_DIR}/tmp_extract/boot.vfat ::logo.jpeg ${PACK_DIR}/input/
+mcopy -i ${PACK_DIR}/tmp_extract/boot.vfat ::ver ${PACK_DIR}/input/
+```
+
+**Boot 分区文件清单** (共 9 个文件):
+1. `fip.bin` - 引导固件 (FSBL/BL2 + OpenSBI + U-Boot SPL)
+2. `boot.sd` - FIT 格式内核镜像包
+3. `usb.dev` - USB 设备模式标记
+4. `usb.ncm` - USB NCM 模式标记
+5. `usb.rndis` - USB RNDIS 模式标记
+6. `wifi.sta` - WiFi 站点模式标记
+7. `gt9xx` - 触摸屏驱动标记
+8. `logo.jpeg` - 启动 Logo (3621 bytes)
+9. `ver` - 版本信息
+
+**作用**: U-Boot 通过这些标记文件检测硬件配置和启动模式
+
+#### B. 修正 FAT 分区几何参数配置
+
+**修改**: `genimage.cfg` 的 FAT 分区配置
+
+```bash
+vfat {
+    label = "boot"
+    files = { ... }
+    # Match vendor FAT geometry: Heads=2, Sectors=32, FAT16
+    extraargs = "-F 16 -h 2 -s 32"
+}
+```
+
+**重要教训**: 
+- ✅ genimage 的 `-h 2 -s 32` 参数有效
+- ❌ **不要事后手动修改 FAT BPB**，会破坏文件系统内部一致性
+- ✅ 现代 SD 卡启动对 Heads 参数不敏感，BootROM 更关注文件系统有效性
+
+#### C. FIT 镜像生成
+
+**修改**: 添加 FIT (Flattened Image Tree) 镜像生成逻辑
+
+```bash
+# 生成 ITS (Image Tree Source) 文件
+cat <<EOF > ${PACK_DIR}/input/ohos_boot.its
+/dts-v1/;
+/ {
+    description = "OpenHarmony SGLinTx Boot Image";
+    #address-cells = <1>;
+    
+    images {
+        kernel {
+            description = "RISC-V OpenHarmony Kernel";
+            data = /incbin/("Image");
+            type = "kernel";
+            arch = "riscv";
+            os = "linux";
+            compression = "none";
+            load = <0x80200000>;
+            entry = <0x80200000>;
+            hash { algo = "crc32"; };
+            hash { algo = "sha256"; };
+        };
+        fdt {
+            description = "SG2002 LicheeRV Nano Device Tree";
+            data = /incbin/("sg2002_licheervnano_sd.dtb");
+            type = "flat_dt";
+            arch = "riscv";
+            compression = "none";
+            hash { algo = "crc32"; };
+            hash { algo = "sha256"; };
+        };
+        ramdisk {
+            description = "OpenHarmony Initial Ramdisk";
+            data = /incbin/("ramdisk.img");
+            type = "ramdisk";
+            arch = "riscv";
+            os = "linux";
+            compression = "none";
+            hash { algo = "crc32"; };
+            hash { algo = "sha256"; };
+        };
+    };
+    
+    configurations {
+        default = "config-1";
+        config-1 {
+            description = "Boot Configuration";
+            kernel = "kernel";
+            ramdisk = "ramdisk";
+            fdt = "fdt";
+        };
+    };
+};
+EOF
+
+# 编译 FIT 镜像
+mkimage -f ohos_boot.its boot.sd
+```
+
+### 8.3 当前状态
+
+✅ **已解决**:
+- BootROM 阶段: fip.bin 正常加载
+- FSBL/OpenSBI: DDR 初始化成功
+- U-Boot 启动: `DRAM: 254 MiB` 检测正常
+- SD 卡识别: MMC 驱动工作正常
+- Boot Logo: logo.jpeg 解码并显示成功
+- FIT 文件读取: `12079500 bytes read` 成功
+
+❌ **待解决** (FIT 配置节点不匹配):
+```
+## Loading kernel from FIT Image at 81800000 ...
+Could not find configuration node
+ERROR: can't get kernel image!
+```
+
+**问题分析**:
+- 官方 boot.sd 使用 `config@1` 节点名
+- OHOS boot.sd 使用 `config-1` 节点名
+- U-Boot 的 distro boot 脚本可能硬编码查找特定节点名
+
+**下一步**: 调整 ITS 文件的 configuration 节点命名以匹配官方格式
+
+---
+
+## 9. 最终状态
+
+### 系统构建: ✅ **成功**
+- 内核编译: 通过 (RISC-V 64位)
+- 系统镜像: 生成完整 (system.img, vendor.img, userdata.img)
+- Boot 镜像: FIT 格式正确生成
+
+### 启动进度: 🟡 **部分成功**
+- ✅ BootROM → FSBL → OpenSBI
+- ✅ U-Boot 启动并初始化
+- ✅ Boot 分区识别和文件读取
+- ❌ FIT 内核加载 (配置节点名称不匹配)
+
+### 镜像信息
+- **路径**: `out/SGLinTx/pack/output/ohos_sglintx.img`
+- **大小**: 3.3 GB
+- **分区**:
+  - Boot: 128 MB (FAT16, 包含 9 个文件)
+  - System: 1.5 GB (EXT4)
+  - Vendor: 256 MB (EXT4)
+  - Userdata: 1.4 GB (EXT4)
+
+### 技术要点总结
+
+1. **RISC-V 编译链**: Clang 不支持 `-mmedany`，需使用 GCC
+2. **Kernel 链接**: 关闭 `CONFIG_KALLSYMS` 避免超限
+3. **FIT 镜像**: 必须用于 SG2002 芯片启动
+4. **Boot 标记文件**: U-Boot 环境检测必需
+5. **FAT 文件系统**: 不要事后手动修改 BPB，使用 genimage 参数
+6. **波特率**: BootROM 乱码正常，U-Boot/Linux 使用 115200 baud

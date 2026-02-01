@@ -156,3 +156,16 @@ if ls ${KERNEL_OBJ_TMP_PATH}/arch/riscv/boot/dts/*.dtb 1> /dev/null 2>&1; then
 fi
 
 echo "Kernel build finished. Output: ${OUTPUT_DIR}/Image"
+
+# 7. Package the final image
+echo "========================================="
+echo "Packaging OHOS image..."
+echo "========================================="
+# Use the first argument which contains the script directory
+KERNEL_SCRIPT_DIR="$1"
+PACKAGE_SCRIPT="${ROOT_DIR}/${KERNEL_SCRIPT_DIR}/package_ohos.sh"
+if [ -f "${PACKAGE_SCRIPT}" ]; then
+    bash "${PACKAGE_SCRIPT}"
+else
+    echo "WARNING: package_ohos.sh not found at ${PACKAGE_SCRIPT}, skipping image packaging"
+fi
