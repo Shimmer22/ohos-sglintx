@@ -80,13 +80,6 @@ cd /home/openharmony
 ./kernel/build_kernel.sh
 ```
 
-## 当前状态 (2026-02-02)
-- ✅ 系统编译通过
-- ✅ 内核加载成功 (U-Boot → Kernel jump)
-- ❌ **内核 console 静默** - 链接地址不匹配问题待解决
-  - Vendor 内核链接地址: 0x80200000 (2MB offset)
-  - OHOS 内核链接地址: 0x80400000 (4MB offset) ← **需修复**
-
 ## 技术配置详解
 
 ### FIT 镜像结构 (boot.sd)
