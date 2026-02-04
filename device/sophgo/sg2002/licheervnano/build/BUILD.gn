@@ -1,0 +1,13 @@
+import("//build/ohos.gni")
+
+LICHEERVNANO_PATH = "//device/sophgo/sg2002/licheervnano"
+
+group("sg2002_licheervnano_build") {
+  deps = [
+    ":sophgo_products",
+  ]
+}
+
+group("sophgo_products") {
+  deps = []
+}

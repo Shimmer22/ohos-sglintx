@@ -1,0 +1,8 @@
+{
+    "device_name": "sg2002_licheervnano",
+    "device_company": "sophgo",
+    "target_os": "ohos",
+    "target_cpu": "riscv",
+    "kernel_version": "",
+    "device_build_path": "device/sophgo/sg2002/licheervnano/build"
+}

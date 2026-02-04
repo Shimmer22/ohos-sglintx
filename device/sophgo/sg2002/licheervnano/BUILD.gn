@@ -1,0 +1,9 @@
+import("//build/ohos.gni")
+import("//build/ohos/kernel/kernel.gni")
+
+group("sg2002_licheervnano") {
+  deps = [
+    "build:sg2002_licheervnano_build",
+    "kernel:linux_kernel",
+  ]
+}

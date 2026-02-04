@@ -1,0 +1,75 @@
+diff --git a/arch/riscv/kernel/vmlinux.lds.S b/arch/riscv/kernel/vmlinux.lds.S
+index f7f4620d59c3..fb0257db63dc 100644
+--- a/arch/riscv/kernel/vmlinux.lds.S
++++ b/arch/riscv/kernel/vmlinux.lds.S
+@@ -121,6 +121,14 @@ SECTIONS
+ 		__pv_table_end = .;
+ 	}
+ 
++#ifdef CONFIG_DRIVERS_HDF
++	.init.hdf_table : {
++		_hdf_drivers_start = .;
++		*(.hdf.driver)
++		_hdf_drivers_end = .;
++	}
++#endif
++
+ 	INIT_DATA_SECTION(16)
+ 
+ 	.exit.data : {
+ diff --git a/drivers/Kconfig b/drivers/Kconfig
+ index dcecc9f6e33f..3963568e6eea 100644
+--- a/drivers/Kconfig
++++ b/drivers/Kconfig
+@@ -235,4 +235,7 @@ source "drivers/interconnect/Kconfig"
+ source "drivers/counter/Kconfig"
+ 
+ source "drivers/most/Kconfig"
++
++source "drivers/hdf/khdf/Kconfig"
++
+ endmenu
+diff --git a/drivers/Makefile b/drivers/Makefile
+ index 576228037718..4cff090d6239 100644
+--- a/drivers/Makefile
++++ b/drivers/Makefile
+@@ -189,3 +189,4 @@ obj-$(CONFIG_GNSS)		+= gnss/
+ obj-$(CONFIG_INTERCONNECT)	+= interconnect/
+ obj-$(CONFIG_COUNTER)		+= counter/
+ obj-$(CONFIG_MOST)		+= most/
++obj-$(CONFIG_DRIVERS_HDF)	+= hdf/
+diff --git a/drivers/hdf/Makefile b/drivers/hdf/Makefile
+new file mode 100644
+index 000000000000..819768c96092
+--- /dev/null
++++ b/drivers/hdf/Makefile
+@@ -0,0 +1,3 @@
++export HDF_RELATIVE_PATH := drivers/huawei_platform/hdf
++export PROJECT_ROOT := ../../../../../
++obj-$(CONFIG_DRIVERS_HDF) += khdf/
+diff --git a/drivers/hdf/framework b/drivers/hdf/framework
+new file mode 120000
+index 000000000000..1fdb7cbb9f34
+--- /dev/null
++++ b/drivers/hdf/framework
+@@ -0,0 +1 @@
++../../../../../../../drivers/framework
+\ No newline at end of file
+diff --git a/drivers/hdf/khdf b/drivers/hdf/khdf
+new file mode 120000
+index 000000000000..0cc53cd109c0
+--- /dev/null
++++ b/drivers/hdf/khdf
+@@ -0,0 +1 @@
++../../../../../../../drivers/adapter/khdf/linux
+\ No newline at end of file
+diff --git a/include/hdf b/include/hdf
+new file mode 120000
+index 000000000000..c85d8ced0400
+--- /dev/null
++++ b/include/hdf
+@@ -0,0 +1 @@
++../../../../../../drivers/framework/include
+\ No newline at end of file
+-- 
+2.25.1

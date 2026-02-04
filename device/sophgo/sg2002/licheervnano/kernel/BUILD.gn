@@ -1,0 +1,34 @@
+import("//build/ohos.gni")
+import("//build/config/clang/clang.gni")
+import("//build/ohos/kernel/kernel.gni")
+
+kernel_build_script_dir = "//device/sophgo/sg2002/licheervnano/kernel"
+kernel_source_dir = "//kernel/linux-5.10-riscv"
+
+action("build_kernel") {
+    script = "build_kernel.sh"
+    sources = [ kernel_source_dir ]
+
+    product_path = "device/sophgo/sg2002/licheervnano"
+    build_type = "standard"
+    device_name = "sg2002_licheervnano"
+    kernel_version = "linux-5.10"
+    
+    outputs = [ "$root_build_dir/packages/phone/images/Image" ]
+    args = [
+        rebase_path(kernel_build_script_dir, root_build_dir),
+        rebase_path("$root_out_dir/../KERNEL_OBJ"),
+        rebase_path("$root_build_dir/packages/phone/images"),
+        build_type,
+        rebase_path("$clang_base_path"),
+        product_path,
+        device_name,
+        kernel_version
+    ]
+}
+
+group("linux_kernel") {
+    deps = [
+        ":build_kernel",
+    ]
+}
