@@ -11,8 +11,8 @@
 - **工作环境**: Docker 容器 `ohos_build_env`
 
 ## 参考资源
-- **Vendor SDK**: `lichee_sdk` (LicheeRV 官方 Buildroot SDK)
-  - 路径: `/path/to/lichee_sdk` (参考内核配置和设备树)
+- **Vendor SDK**: `LicheeRV-Nano-Build` (LicheeRV 官方 Buildroot SDK)
+  - 路径: `/path/to/LicheeRV-Nano-Build` (参考内核配置和设备树)
   - 作用: 提供已验证的硬件配置、defconfig、设备树
 - **参考移植**: 全志 D1 OpenHarmony 仓库
   - 同为平头哥 C906 RISC-V 芯片
@@ -31,7 +31,7 @@
   - `kernel/` - 内核构建脚本目录
 
 ### 内核相关路径
-- **内核源码**: `lichee_sdk/linux_5.10/` (Vendor SDK)
+- **内核源码**: `LicheeRV-Nano-Build/linux_5.10/` (Vendor SDK)
   - 编译时复制到: `out/kernel/src_tmp/linux-5.10/`
 - **内核配置**: `kernel/linux/config/linux-5.10/SGLinTx_small_defconfig`
   - 也位于: `device/board/Humpback/SGLinTx/kernel/SGLinTx_small_defconfig`
@@ -40,9 +40,9 @@
 - **打包脚本**: `device/board/Humpback/SGLinTx/kernel/package_ohos.sh`
 
 ### 设备树 (Device Tree)
-- **源文件位置** (lichee_sdk):
-  - 主板 DTS: `lichee_sdk/build/boards/sg200x/sg2002_licheervnano_sd/dts_riscv/sg2002_licheervnano_sd.dts`
-  - 公共 DTSI: `lichee_sdk/build/boards/default/dts/sg200x/soph_*.dtsi`
+- **源文件位置** (LicheeRV-Nano-Build):
+  - 主板 DTS: `LicheeRV-Nano-Build/build/boards/sg200x/sg2002_licheervnano_sd/dts_riscv/sg2002_licheervnano_sd.dts`
+  - 公共 DTSI: `LicheeRV-Nano-Build/build/boards/default/dts/sg200x/soph_*.dtsi`
 - **编译时位置**: `out/kernel/src_tmp/linux-5.10/arch/riscv/boot/dts/cvitek/`
 - **编译产物**: `out/kernel/OBJ/linux-5.10/arch/riscv/boot/dts/cvitek/*.dtb`
 - **最终输出**: `out/SGLinTx/packages/phone/images/sg2002_licheervnano_sd.dtb`
