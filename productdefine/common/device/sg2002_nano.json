@@ -1,0 +1,7 @@
+{
+  "device_name": "sg2002_nano",
+  "device_company": "sophgo",
+  "target_os": "ohos",
+  "target_cpu": "riscv64",
+  "kernel_version": "5.10"
+}

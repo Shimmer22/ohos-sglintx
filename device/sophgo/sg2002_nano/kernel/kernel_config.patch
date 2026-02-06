@@ -1,0 +1,17 @@
+# SG2002 Linux 5.10 Kernel Configuration for OpenHarmony
+# Required kernel options for OpenHarmony support
+
+# Android/Binder support (required for OpenHarmony)
+CONFIG_ANDROID=y
+CONFIG_ANDROID_BINDER_IPC=y
+CONFIG_ANDROID_BINDER_DEVICES="binder,hwbinder,vndbinder"
+
+# OpenHarmony specific
+CONFIG_HILOG=m
+CONFIG_HIEVENT=m
+
+# HDF support (if available)
+CONFIG_DRIVERS_HDF=y
+
+# Debug options
+CONFIG_DEBUG_FS=y

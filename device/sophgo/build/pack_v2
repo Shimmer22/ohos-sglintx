@@ -1,0 +1,608 @@
+#!/bin/bash
+
+# Copyright (C) 2024 Sophgo Technologies Co., Ltd.
+# Licensed under the Apache License, Version 2.0
+# SG2002 (LicheeRV Nano) OpenHarmony Firmware Pack Script V2
+# Based on Vendor SDK analysis - Correct partition layout and FIT image
+
+set -e
+
+# Configuration - Based on Vendor SDK Analysis
+CHIP="sg2002"
+BOARD="licheerv_nano"
+CHIP_FAMILY="cv181x"
+
+# Partition layout from vendor SDK:
+# - Part 1 (Boot): Start LBA 1, 16MB, FAT16, Type 0x0C
+# - Part 2 (RootFS): Linux Type 0x83
+BOOT_PARTITION_START=1
+BOOT_PARTITION_SIZE_MB=16
+BOOT_PARTITION_TYPE="0x0C"
+BOOT_FS_TYPE="fat"
+ROOTFS_PARTITION_TYPE="0x83"
+
+# Default values
+ROOTFS_TYPE="squashfs"  # Use squashfs by default
+FIP_BIN_SOURCE=""  # Path to fip.bin from vendor SDK
+
+# Output directories
+TOPDIR=$(cd $(dirname $0)/../../..; pwd)
+OUT_DIR="${TOPDIR}/out/${BOARD}"
+OHOS_OUT="${TOPDIR}/out/ohos-riscv64-release"
+KERNEL_OBJ="${TOPDIR}/out/KERNEL_OBJ"
+
+# Source paths
+KERNEL_SRC="${KERNEL_OBJ}/kernel/src_tmp/linux-5.10"
+DEVICE_CONFIG="${TOPDIR}/device/sophgo/config/chips/${CHIP}/configs/${BOARD}"
+
+# Vendor SDK paths
+VENDOR_SDK="${TOPDIR}/LicheeRV-Nano-Build"
+MKIMAGE="${VENDOR_SDK}/build/tools/common/prebuild/mkimage"
+
+echo "=========================================="
+echo "SG2002 OpenHarmony Firmware Pack Script V2"
+echo "Based on Vendor SDK Partition Layout"
+echo "=========================================="
+
+pack_usage()
+{
+    echo "Usage: $0 [options]"
+    echo ""
+    echo "Options:"
+    echo "  -t TYPE       Root filesystem type: squashfs (default) or ext4"
+    echo "  -k PATH       Kernel image path (default: auto-detect)"
+    echo "  -d PATH       Device tree path (default: auto-detect)"
+    echo "  -r PATH       Rootfs directory (default: ${OHOS_OUT}/packages/phone)"
+    echo "  -o PATH       Output directory (default: ${OUT_DIR})"
+    echo "  -f PATH       fip.bin path (required for bootable image)"
+    echo "  -h            Show this help message"
+    echo ""
+    echo "Examples:"
+    echo "  $0 -f /path/to/fip.bin                    # Pack with vendor fip.bin"
+    echo "  $0 -t ext4 -f /path/to/fip.bin            # Use ext4 rootfs"
+    echo ""
+    echo "Note: To get fip.bin, compile the vendor SDK or extract from working image:"
+    echo "  dd if=vendor_image.img of=fip.bin bs=512 skip=1 count=32768"
+}
+
+# Parse arguments
+while getopts "t:k:d:r:o:f:h" opt; do
+    case $opt in
+        t)
+            ROOTFS_TYPE="$OPTARG"
+            ;;
+        k)
+            KERNEL_IMAGE="$OPTARG"
+            ;;
+        d)
+            DTB_FILE="$OPTARG"
+            ;;
+        r)
+            ROOTFS_DIR="$OPTARG"
+            ;;
+        o)
+            OUT_DIR="$OPTARG"
+            ;;
+        f)
+            FIP_BIN_SOURCE="$OPTARG"
+            ;;
+        h)
+            pack_usage
+            exit 0
+            ;;
+        \?)
+            echo "Invalid option: -$OPTARG" >&2
+            pack_usage
+            exit 1
+            ;;
+    esac
+done
+
+# Set default paths if not provided
+if [ -z "$KERNEL_IMAGE" ]; then
+    KERNEL_IMAGE="${KERNEL_SRC}/arch/riscv/boot/Image"
+fi
+
+if [ -z "$DTB_FILE" ]; then
+    # Find dtb file
+    DTB_FILE=$(find ${KERNEL_SRC}/arch/riscv/boot/dts -name "*.dtb" | head -1)
+fi
+
+if [ -z "$ROOTFS_DIR" ]; then
+    ROOTFS_DIR="${OHOS_OUT}/packages/phone"
+fi
+
+echo ""
+echo "Configuration:"
+echo "  Chip:           ${CHIP}"
+echo "  Board:          ${BOARD}"
+echo "  Rootfs type:    ${ROOTFS_TYPE}"
+echo "  Kernel:         ${KERNEL_IMAGE}"
+echo "  DTB:            ${DTB_FILE}"
+echo "  Rootfs dir:     ${ROOTFS_DIR}"
+echo "  fip.bin:        ${FIP_BIN_SOURCE:-"NOT PROVIDED (image won't boot)"}"
+echo "  Output:         ${OUT_DIR}"
+echo ""
+
+# Check required files
+check_required_files()
+{
+    echo "Checking required files..."
+    
+    if [ ! -f "${KERNEL_IMAGE}" ]; then
+        echo "ERROR: Kernel image not found: ${KERNEL_IMAGE}"
+        echo "Please build the kernel first:"
+        echo "  cd ${TOPDIR}/kernel/linux/patches"
+        echo "  make -f kernel-5.10.mk"
+        exit 1
+    fi
+    
+    if [ ! -f "${DTB_FILE}" ]; then
+        echo "WARNING: Device tree not found, will try to find one"
+    fi
+    
+    if [ ! -d "${ROOTFS_DIR}" ]; then
+        echo "ERROR: Rootfs directory not found: ${ROOTFS_DIR}"
+        echo "Please build OpenHarmony first:"
+        echo "  cd ${TOPDIR}"
+        echo "  ./build.sh --product-name sg2002_nano"
+        exit 1
+    fi
+    
+    if [ -z "$FIP_BIN_SOURCE" ]; then
+        echo "WARNING: fip.bin not provided. The image will be created but WON'T BOOT."
+        echo "To make a bootable image, provide fip.bin from vendor SDK:"
+        echo "  $0 -f /path/to/fip.bin"
+    fi
+    
+    echo "  ✓ Required files checked"
+}
+
+# Create output directory
+create_output_dir()
+{
+    echo "Creating output directory..."
+    rm -rf "${OUT_DIR}"
+    mkdir -p "${OUT_DIR}"
+    mkdir -p "${OUT_DIR}/rawimages"
+    echo "  ✓ Output directory: ${OUT_DIR}"
+}
+
+# Create FIT image (boot.itb)
+# Based on vendor SDK multi.its format
+create_fit_image()
+{
+    echo ""
+    echo "Creating FIT image (boot.itb)..."
+    
+    local work_dir="${OUT_DIR}/fit_work"
+    mkdir -p "${work_dir}"
+    
+    # Copy kernel
+    cp "${KERNEL_IMAGE}" "${work_dir}/Image"
+    
+    # Compress kernel
+    gzip -9 -f "${work_dir}/Image"
+    
+    # Create ramdisk
+    echo "  Creating ramdisk..."
+    local ramdisk_dir="${work_dir}/ramdisk"
+    mkdir -p "${ramdisk_dir}/bin" "${ramdisk_dir}/dev" "${ramdisk_dir}/proc" "${ramdisk_dir}/sys" "${ramdisk_dir}/mnt"
+    
+    cat > "${ramdisk_dir}/init" << 'EOF'
+#!/bin/sh
+# OpenHarmony SG2002 Init
+
+echo "OHOS SG2002 init..."
+
+mount -t proc proc /proc
+mount -t sysfs sysfs /sys
+mount -t devtmpfs devtmpfs /dev
+
+sleep 1
+
+# Try to mount rootfs from SD card
+if mount -t squashfs /dev/mmcblk0p2 /mnt 2>/dev/null; then
+    echo "Mounted squashfs rootfs"
+elif mount -t ext4 /dev/mmcblk0p2 /mnt 2>/dev/null; then
+    echo "Mounted ext4 rootfs"
+else
+    echo "ERROR: Cannot mount rootfs"
+    /bin/sh
+fi
+
+cd /mnt
+exec switch_root . /init
+EOF
+    chmod +x "${ramdisk_dir}/init"
+    
+    cd "${ramdisk_dir}"
+    find . | cpio -o -H newc | gzip -9 > "${work_dir}/boot.cpio.gz"
+    cd - > /dev/null
+    
+    # Create its file for FIT image
+    cat > "${work_dir}/openharmony.its" << EOF
+/dts-v1/;
+
+/ {
+    description = "OpenHarmony SG2002 Kernel + Ramdisk + FDT";
+    #address-cells = <2>;
+
+    images {
+        kernel-1 {
+            description = "OpenHarmony Linux Kernel";
+            data = /incbin/("${work_dir}/Image.gz");
+            type = "kernel";
+            arch = "riscv";
+            os = "linux";
+            compression = "gzip";
+            load = <0x0 0x80200000>;
+            entry = <0x0 0x80200000>;
+            hash-1 {
+                algo = "crc32";
+            };
+        };
+
+        ramdisk-1 {
+            description = "OpenHarmony Ramdisk";
+            data = /incbin/("${work_dir}/boot.cpio.gz");
+            type = "ramdisk";
+            arch = "riscv";
+            os = "linux";
+            compression = "gzip";
+            load = <0x0 0x00000000>;
+            entry = <0x0 0x00000000>;
+            hash-1 {
+                algo = "crc32";
+            };
+        };
+EOF
+
+    # Add FDT if available
+    if [ -f "${DTB_FILE}" ]; then
+        cp "${DTB_FILE}" "${work_dir}/sg2002.dtb"
+        cat >> "${work_dir}/openharmony.its" << EOF
+
+        fdt-1 {
+            description = "SG2002 Device Tree";
+            data = /incbin/("${work_dir}/sg2002.dtb");
+            type = "flat_dt";
+            arch = "riscv";
+            compression = "none";
+            hash-1 {
+                algo = "crc32";
+            };
+        };
+EOF
+    fi
+
+    # Close images section and add configurations
+    cat >> "${work_dir}/openharmony.its" << EOF
+    };
+
+    configurations {
+        default = "conf-1";
+
+        conf-1 {
+            description = "OpenHarmony SG2002 Configuration";
+            kernel = "kernel-1";
+            ramdisk = "ramdisk-1";
+EOF
+
+    if [ -f "${DTB_FILE}" ]; then
+        cat >> "${work_dir}/openharmony.its" << EOF
+            fdt = "fdt-1";
+EOF
+    fi
+
+    cat >> "${work_dir}/openharmony.its" << EOF
+            hash-1 {
+                algo = "crc32";
+            };
+        };
+    };
+};
+EOF
+
+    # Create FIT image using mkimage
+    if [ -x "${MKIMAGE}" ]; then
+        echo "  Using vendor mkimage tool..."
+        "${MKIMAGE}" -f "${work_dir}/openharmony.its" "${OUT_DIR}/rawimages/boot.itb"
+    else
+        echo "  WARNING: mkimage not found at ${MKIMAGE}"
+        echo "  Attempting to use system mkimage..."
+        if command -v mkimage &> /dev/null; then
+            mkimage -f "${work_dir}/openharmony.its" "${OUT_DIR}/rawimages/boot.itb"
+        else
+            echo "  ERROR: mkimage not found. Please install u-boot-tools"
+            exit 1
+        fi
+    fi
+    
+    # Copy to boot.sd (vendor naming)
+    cp "${OUT_DIR}/rawimages/boot.itb" "${OUT_DIR}/rawimages/boot.sd"
+    
+    echo "  ✓ FIT image: ${OUT_DIR}/rawimages/boot.itb"
+    echo "  ✓ Boot SD: ${OUT_DIR}/rawimages/boot.sd"
+    
+    # Cleanup work dir
+    rm -rf "${work_dir}"
+}
+
+# Generate rootfs image
+gen_rootfs()
+{
+    echo ""
+    echo "Generating rootfs (${ROOTFS_TYPE})..."
+    
+    local rootfs_img="${OUT_DIR}/rawimages/rootfs.sd"
+    local rootfs_dir="${OUT_DIR}/rootfs"
+    
+    # Create rootfs directory
+    rm -rf "${rootfs_dir}"
+    mkdir -p "${rootfs_dir}"
+    
+    # Copy OHOS rootfs
+    echo "  Copying OpenHarmony rootfs..."
+    if [ -d "${ROOTFS_DIR}/root" ]; then
+        cp -rf "${ROOTFS_DIR}/root"/* "${rootfs_dir}/"
+    fi
+    
+    if [ -d "${ROOTFS_DIR}/system" ]; then
+        mkdir -p "${rootfs_dir}/system"
+        cp -rf "${ROOTFS_DIR}/system"/* "${rootfs_dir}/system/"
+    fi
+    
+    if [ -d "${ROOTFS_DIR}/vendor" ]; then
+        mkdir -p "${rootfs_dir}/vendor"
+        cp -rf "${ROOTFS_DIR}/vendor"/* "${rootfs_dir}/vendor/"
+    fi
+    
+    # Create device nodes
+    mkdir -p "${rootfs_dir}/dev"
+    
+    # Generate rootfs image
+    if [ "${ROOTFS_TYPE}" == "squashfs" ]; then
+        echo "  Creating squashfs image..."
+        if command -v mksquashfs &> /dev/null; then
+            mksquashfs "${rootfs_dir}" "${rootfs_img}" \
+                -noappend -root-owned -comp xz -b 256k \
+                -p '/dev d 755 0 0' \
+                -p '/dev/console c 600 0 0 5 1' \
+                -p '/dev/null c 666 0 0 1 3' \
+                -p '/dev/zero c 666 0 0 1 5' \
+                -p '/dev/random c 666 0 0 1 8' \
+                -p '/dev/urandom c 666 0 0 1 9'
+        else
+            echo "ERROR: mksquashfs not found"
+            exit 1
+        fi
+    else
+        echo "  Creating ext4 image..."
+        local size_mb=1600  # 1.6GB as per vendor spec
+        
+        dd if=/dev/zero of="${rootfs_img}" bs=1M count=${size_mb}
+        mkfs.ext4 -F -L rootfs "${rootfs_img}"
+        
+        echo "  Note: To populate ext4, run with root or manually mount and copy files"
+    fi
+    
+    echo "  ✓ Rootfs image: ${rootfs_img} ($(stat -c%s "${rootfs_img}" | numfmt --to=iec))"
+}
+
+# Copy fip.bin if available
+copy_fip()
+{
+    echo ""
+    if [ -n "$FIP_BIN_SOURCE" ] && [ -f "$FIP_BIN_SOURCE" ]; then
+        echo "Copying fip.bin..."
+        cp "${FIP_BIN_SOURCE}" "${OUT_DIR}/rawimages/fip.bin"
+        echo "  ✓ fip.bin: ${OUT_DIR}/rawimages/fip.bin"
+    else
+        echo "WARNING: fip.bin not available"
+        echo "  The image won't be bootable without fip.bin"
+        echo "  To add it later:"
+        echo "    1. Mount the first partition"
+        echo "    2. Copy fip.bin to the partition"
+    fi
+}
+
+# Generate SD card image with correct partition layout
+gen_sd_image()
+{
+    echo ""
+    echo "Generating SD card image with vendor layout..."
+    
+    local sd_img="${OUT_DIR}/sg2002_${BOARD}_ohos.img"
+    local boot_img_size_mb=${BOOT_PARTITION_SIZE_MB}
+    local total_size_mb=$((boot_img_size_mb + 1700))  # 16MB boot + ~1.7GB rootfs
+    
+    echo "  SD card image size: ${total_size_mb}MB"
+    echo "  Partition 1 (boot): ${boot_img_size_mb}MB, FAT, start LBA ${BOOT_PARTITION_START}"
+    echo "  Partition 2 (rootfs): Linux, start after boot partition"
+    
+    # Create raw image
+    dd if=/dev/zero of="${sd_img}" bs=1M count=${total_size_mb}
+    
+    # Create partition table with vendor layout
+    # Geometry: Heads=2, Sectors per Track=32
+    # Part 1: Start LBA 1, 16MB, Type 0x0C (FAT32 LBA), Active
+    # Part 2: Start after boot partition, Type 0x83 (Linux)
+    
+    local boot_sectors=$((boot_img_size_mb * 1024 * 1024 / 512))
+    
+    echo "  Creating MBR partition table..."
+    sfdisk "${sd_img}" << EOF
+label: dos
+unit: sectors
+sector-size: 512
+
+start=${BOOT_PARTITION_START}, size=${boot_sectors}, type=${BOOT_PARTITION_TYPE}, bootable
+start=$((BOOT_PARTITION_START + boot_sectors)), type=${ROOTFS_PARTITION_TYPE}
+EOF
+    
+    # Write rootfs to partition 2
+    echo "  Writing rootfs to partition 2..."
+    dd if="${OUT_DIR}/rawimages/rootfs.sd" of="${sd_img}" bs=512 seek=$((BOOT_PARTITION_START + boot_sectors)) conv=notrunc
+    
+    # Setup loop device for partition 1
+    local loop_dev=$(losetup -f --show -P "${sd_img}")
+    
+    # Format and populate boot partition
+    echo "  Formatting boot partition (FAT16)..."
+    mkfs.fat -F 16 -n "boot" "${loop_dev}p1"
+    
+    if [ $(id -u) -eq 0 ]; then
+        echo "  Copying files to boot partition..."
+        mkdir -p /tmp/boot_part
+        mount "${loop_dev}p1" /tmp/boot_part
+        
+        # Copy fip.bin (required for boot)
+        if [ -f "${OUT_DIR}/rawimages/fip.bin" ]; then
+            cp "${OUT_DIR}/rawimages/fip.bin" /tmp/boot_part/
+        fi
+        
+        # Copy boot.sd (FIT image)
+        if [ -f "${OUT_DIR}/rawimages/boot.sd" ]; then
+            cp "${OUT_DIR}/rawimages/boot.sd" /tmp/boot_part/
+        fi
+        
+        # Copy kernel image (optional, for reference)
+        if [ -f "${KERNEL_IMAGE}" ]; then
+            cp "${KERNEL_IMAGE}" /tmp/boot_part/Image
+        fi
+        
+        # Copy DTB (optional)
+        if [ -f "${DTB_FILE}" ]; then
+            cp "${DTB_FILE}" /tmp/boot_part/sg2002.dtb
+        fi
+        
+        umount /tmp/boot_part
+        rmdir /tmp/boot_part
+    else
+        echo "  Warning: Running without root, cannot populate boot partition"
+        echo "  To complete the image, run as root or manually copy files:"
+        echo "    sudo mount ${loop_dev}p1 /mnt"
+        echo "    sudo cp ${OUT_DIR}/rawimages/fip.bin /mnt/"
+        echo "    sudo cp ${OUT_DIR}/rawimages/boot.sd /mnt/"
+        echo "    sudo umount /mnt"
+    fi
+    
+    # Cleanup
+    losetup -d "${loop_dev}"
+    
+    echo "  ✓ SD card image: ${sd_img} ($(stat -c%s "${sd_img}" | numfmt --to=iec))"
+}
+
+# Create installation script
+gen_install_script()
+{
+    echo ""
+    echo "Generating installation script..."
+    
+    cat > "${OUT_DIR}/flash.sh" << EOF
+#!/bin/bash
+# OpenHarmony SG2002 Flash Script
+# Run this script with root privileges
+
+set -e
+
+if [ \$# -lt 1 ]; then
+    echo "Usage: sudo \$0 <SD card device>"
+    echo "Example: sudo \$0 /dev/sdb"
+    exit 1
+fi
+
+if [ \$(id -u) -ne 0 ]; then
+    echo "ERROR: This script must be run as root"
+    exit 1
+fi
+
+DEVICE=\$1
+OUT_DIR="$(dirname \$0)"
+
+echo "Flashing OpenHarmony SG2002 to \${DEVICE}..."
+echo "WARNING: This will erase all data on \${DEVICE}!"
+read -p "Are you sure? (yes/no): " confirm
+if [ "\${confirm}" != "yes" ]; then
+    echo "Aborted"
+    exit 1
+fi
+
+# Check if device exists
+if [ ! -b "\${DEVICE}" ]; then
+    echo "ERROR: \${DEVICE} is not a valid block device"
+    exit 1
+fi
+
+# Flash the complete image
+if [ -f "\${OUT_DIR}/sg2002_${BOARD}_ohos.img" ]; then
+    echo "Flashing complete image..."
+    dd if="\${OUT_DIR}/sg2002_${BOARD}_ohos.img" of="\${DEVICE}" bs=4M status=progress conv=fsync
+    sync
+    echo "Flashing complete!"
+else
+    echo "ERROR: Image file not found"
+    exit 1
+fi
+
+echo ""
+echo "You can now boot your SG2002 board with this SD card."
+echo ""
+echo "Note: If fip.bin was not included, the board won't boot."
+echo "To add fip.bin manually:"
+echo "  1. Mount the first partition: sudo mount \${DEVICE}1 /mnt"
+echo "  2. Copy fip.bin: sudo cp /path/to/fip.bin /mnt/"
+echo "  3. Unmount: sudo umount /mnt"
+EOF
+    chmod +x "${OUT_DIR}/flash.sh"
+    echo "  ✓ Installation script: ${OUT_DIR}/flash.sh"
+}
+
+# Main function
+main()
+{
+    echo ""
+    check_required_files
+    create_output_dir
+    create_fit_image
+    gen_rootfs
+    copy_fip
+    gen_sd_image
+    gen_install_script
+    
+    echo ""
+    echo "=========================================="
+    echo "Packaging Complete!"
+    echo "=========================================="
+    echo ""
+    echo "Output files:"
+    ls -lh "${OUT_DIR}/rawimages/"
+    ls -lh "${OUT_DIR}/sg2002_${BOARD}_ohos.img"
+    ls -lh "${OUT_DIR}/flash.sh"
+    echo ""
+    
+    if [ -z "$FIP_BIN_SOURCE" ]; then
+        echo "⚠️  IMPORTANT: fip.bin not included!"
+        echo "   To make a bootable image, run with -f option:"
+        echo "   $0 -f /path/to/fip.bin"
+        echo ""
+        echo "   fip.bin contains: FSBL + OpenSBI + U-Boot"
+        echo "   You can get it by:"
+        echo "   1. Compiling vendor SDK: cd LicheeRV-Nano-Build && source build/envsetup_soc.sh && build_all"
+        echo "   2. Extracting from working SD card:"
+        echo "      sudo dd if=/dev/sdX of=fip.bin bs=512 skip=1 count=32768"
+    else
+        echo "✅ Bootable image created!"
+        echo ""
+        echo "To flash to SD card:"
+        echo "  cd ${OUT_DIR}"
+        echo "  sudo ./flash.sh /dev/sdX"
+        echo ""
+        echo "Or use dd directly:"
+        echo "  sudo dd if=${OUT_DIR}/sg2002_${BOARD}_ohos.img of=/dev/sdX bs=4M status=progress"
+    fi
+}
+
+# Run main
+main

@@ -1,0 +1,423 @@
+#!/bin/bash
+
+# Copyright (C) 2024 Sophgo Technologies Co., Ltd.
+# Licensed under the Apache License, Version 2.0
+# SG2002 (LicheeRV Nano) OpenHarmony Firmware Pack Script V3
+# Based on Vendor SDK genimage workflow
+
+set -e
+
+# Configuration
+CHIP="sg2002"
+BOARD="licheerv_nano"
+
+# Default values
+ROOTFS_TYPE="squashfs"
+FIP_BIN_SOURCE=""
+
+# Output directories
+# In Docker, we assume we are at /home/openharmony/device/sophgo/build, so TOPDIR is /home/openharmony
+TOPDIR=$(cd $(dirname $0)/../../..; pwd)
+OUT_DIR="${TOPDIR}/out/${BOARD}"
+OHOS_OUT="${TOPDIR}/out/ohos-riscv64-release"
+KERNEL_OBJ="${TOPDIR}/out/KERNEL_OBJ"
+
+# Source paths
+KERNEL_SRC="${KERNEL_OBJ}/kernel/src_tmp/linux-5.10"
+
+# Vendor SDK paths
+VENDOR_SDK="${TOPDIR}/LicheeRV-Nano-Build"
+# Locate genimage in vendor SDK or system
+if [ -f "${VENDOR_SDK}/build/tools/common/sd_tools/genimage" ]; then
+    GENIMAGE="${VENDOR_SDK}/build/tools/common/sd_tools/genimage"
+elif command -v genimage &> /dev/null; then
+    GENIMAGE=$(command -v genimage)
+else
+    echo "ERROR: genimage not found! Please check VENDOR_SDK path or install genimage."
+    exit 1
+fi
+
+MKIMAGE="${VENDOR_SDK}/build/tools/common/prebuild/mkimage"
+if [ ! -x "${MKIMAGE}" ]; then
+    if command -v mkimage &> /dev/null; then
+        MKIMAGE=$(command -v mkimage)
+    else
+        echo "ERROR: mkimage not found!"
+        exit 1
+    fi
+fi
+
+echo "=========================================="
+echo "SG2002 OpenHarmony Firmware Pack Script V3"
+echo "Using genimage for packaging"
+echo "=========================================="
+
+pack_usage()
+{
+    echo "Usage: $0 [options]"
+    echo ""
+    echo "Required Options:"
+    echo "  -f PATH       fip.bin path (REQUIRED for bootable image)"
+    echo ""
+    echo "Optional Options:"
+    echo "  -t TYPE       Root filesystem type: squashfs (default) or ext4"
+    echo "  -k PATH       Kernel image path (default: auto-detect from kernel build)"
+    echo "  -d PATH       Device tree path (default: auto-detect)"
+    echo "  -r PATH       Rootfs directory (default: ${OHOS_OUT}/packages/phone)"
+    echo "  -o PATH       Output directory (default: ${OUT_DIR})"
+    echo "  -h            Show this help message"
+    echo ""
+    echo "Prerequisites:"
+    echo "  1. OpenHarmony must be built: ./build.sh --product-name sg2002_nano"
+    echo "  2. Kernel must be built: cd kernel/linux/patches && make -f kernel-5.10.mk"
+    echo "  3. fip.bin must be provided (see below for how to get it)"
+    echo ""
+    echo "How to get fip.bin:"
+    echo "  Method 1 - From vendor SDK build:"
+    echo "    cd ${VENDOR_SDK}"
+    echo "    source build/envsetup_soc.sh"
+    echo "    lunch sg2002_licheervnano_sd"
+    echo "    make_fsbl"
+    echo "    # fip.bin will be at: ${VENDOR_SDK}/out/sg2002_licheervnano_sd/fip.bin"
+    echo ""
+    echo "  Method 2 - Extract from existing SD card:"
+    echo "    # Insert a working vendor SD card"
+    echo "    sudo dd if=/dev/sdX of=fip.bin bs=512 skip=1 count=32768"
+    echo "    # Replace /dev/sdX with your SD card device"
+    echo ""
+    echo "  Method 3 - Copy from pre-built:"
+    echo "    cp ${VENDOR_SDK}/soc_sg2002_licheervnano_sd/fip.bin ./"
+    echo ""
+    echo "Examples:"
+    echo "  $0 -f /path/to/fip.bin                                    # Pack with default options"
+    echo "  $0 -f /path/to/fip.bin -t ext4                           # Use ext4 rootfs"
+    echo "  $0 -f /path/to/fip.bin -o /custom/output                 # Custom output directory"
+    echo "  $0 -f /path/to/fip.bin -k /path/to/Image -d /path/to/dtb # Custom kernel and dtb"
+    echo ""
+    echo "Output files:"
+    echo "  - ${OUT_DIR}/licheerv_nano.img          # Complete SD card image"
+    echo "  - ${OUT_DIR}/flash.sh                    # Flash script"
+    echo "  - ${OUT_DIR}/rawimages/boot.sd          # FIT boot image"
+    echo "  - ${OUT_DIR}/rawimages/rootfs.sd        # Root filesystem"
+    echo "  - ${OUT_DIR}/rawimages/fip.bin          # Boot firmware"
+    echo ""
+    echo "Burning the image:"
+    echo "  Method 1 - Using flash script:"
+    echo "    cd ${OUT_DIR}"
+    echo "    sudo ./flash.sh /dev/sdX"
+    echo ""
+    echo "  Method 2 - Using dd:"
+    echo "    sudo dd if=${OUT_DIR}/licheerv_nano.img of=/dev/sdX bs=4M status=progress"
+    echo ""
+    echo "Boot process:"
+    echo "  Mask ROM -> fip.bin (FSBL+OpenSBI+U-Boot) -> boot.sd (FIT) -> Linux -> OpenHarmony"
+    echo ""
+}
+
+# Parse arguments
+while getopts "t:k:d:r:o:f:h" opt; do
+    case $opt in
+        t) ROOTFS_TYPE="$OPTARG" ;;
+        k) KERNEL_IMAGE="$OPTARG" ;;
+        d) DTB_FILE="$OPTARG" ;;
+        r) ROOTFS_DIR="$OPTARG" ;;
+        o) OUT_DIR="$OPTARG" ;;
+        f) FIP_BIN_SOURCE="$OPTARG" ;;
+        h) pack_usage; exit 0 ;;
+        \?) echo "Invalid option: -$OPTARG" >&2; pack_usage; exit 1 ;;
+    esac
+done
+
+# Set default paths
+if [ -z "$KERNEL_IMAGE" ]; then
+    KERNEL_IMAGE="${KERNEL_SRC}/arch/riscv/boot/Image"
+fi
+
+if [ -z "$DTB_FILE" ]; then
+    DTB_FILE=$(find ${KERNEL_SRC}/arch/riscv/boot/dts -name "*.dtb" | head -1)
+fi
+
+if [ -z "$ROOTFS_DIR" ]; then
+    ROOTFS_DIR="${OHOS_OUT}/packages/phone"
+fi
+
+echo ""
+echo "Configuration:"
+echo "  Chip:           ${CHIP}"
+echo "  Board:          ${BOARD}"
+echo "  Rootfs type:    ${ROOTFS_TYPE}"
+echo "  Kernel:         ${KERNEL_IMAGE}"
+echo "  DTB:            ${DTB_FILE}"
+echo "  Rootfs dir:     ${ROOTFS_DIR}"
+echo "  fip.bin:        ${FIP_BIN_SOURCE}"
+echo "  Output:         ${OUT_DIR}"
+echo "  Genimage:       ${GENIMAGE}"
+echo ""
+
+check_required_files()
+{
+    if [ ! -f "${KERNEL_IMAGE}" ]; then
+        echo "ERROR: Kernel image not found: ${KERNEL_IMAGE}"
+        exit 1
+    fi
+    
+    if [ ! -d "${ROOTFS_DIR}" ]; then
+        echo "ERROR: Rootfs directory not found: ${ROOTFS_DIR}"
+        exit 1
+    fi
+    
+if [ -z "$FIP_BIN_SOURCE" ]; then
+    echo ""
+    echo "=========================================="
+    echo "ERROR: fip.bin not provided!"
+    echo "=========================================="
+    echo ""
+    echo "fip.bin is REQUIRED to create a bootable image."
+    echo ""
+    echo "Quick fix:"
+    echo "  $0 -f /path/to/fip.bin"
+    echo ""
+    echo "For detailed help on how to obtain fip.bin, run:"
+    echo "  $0 -h"
+    echo ""
+    echo "Common fip.bin locations:"
+    echo "  - ${VENDOR_SDK}/soc_sg2002_licheervnano_sd/fip.bin"
+    echo "  - ${VENDOR_SDK}/out/sg2002_licheervnano_sd/fip.bin"
+    echo ""
+    exit 1
+fi
+
+if [ ! -f "${FIP_BIN_SOURCE}" ]; then
+    echo ""
+    echo "=========================================="
+    echo "ERROR: fip.bin file not found!"
+    echo "=========================================="
+    echo ""
+    echo "File not found: ${FIP_BIN_SOURCE}"
+    echo ""
+    echo "Please check the path and try again."
+    echo ""
+    echo "For help on how to obtain fip.bin, run:"
+    echo "  $0 -h"
+    echo ""
+    exit 1
+fi
+}
+
+create_output_dir()
+{
+    echo "Creating output directory..."
+    rm -rf "${OUT_DIR}"
+    mkdir -p "${OUT_DIR}/genimage_input"
+    mkdir -p "${OUT_DIR}/genimage_tmp"
+}
+
+create_fit_image()
+{
+    echo "Creating FIT image (boot.itb)..."
+    local work_dir="${OUT_DIR}/fit_work"
+    mkdir -p "${work_dir}"
+    
+    # Copy and compress kernel
+    cp "${KERNEL_IMAGE}" "${work_dir}/Image"
+    gzip -9 -f "${work_dir}/Image"
+    
+    # Create minimal ramdisk
+    local ramdisk_dir="${work_dir}/ramdisk"
+    mkdir -p "${ramdisk_dir}/bin" "${ramdisk_dir}/dev" "${ramdisk_dir}/mnt"
+    cat > "${ramdisk_dir}/init" << 'EOF'
+#!/bin/sh
+mount -t devtmpfs devtmpfs /dev
+mount -t squashfs /dev/mmcblk0p2 /mnt 2>/dev/null || mount -t ext4 /dev/mmcblk0p2 /mnt
+cd /mnt
+exec switch_root . /init
+EOF
+    chmod +x "${ramdisk_dir}/init"
+    cd "${ramdisk_dir}"
+    find . | cpio -o -H newc | gzip -9 > "${work_dir}/boot.cpio.gz"
+    cd - > /dev/null
+    
+    # Create ITS
+    cat > "${work_dir}/openharmony.its" << EOF
+/dts-v1/;
+/ {
+    description = "OpenHarmony SG2002 Kernel + Ramdisk + FDT";
+    #address-cells = <2>;
+    images {
+        kernel-1 {
+            description = "OpenHarmony Linux Kernel";
+            data = /incbin/("${work_dir}/Image.gz");
+            type = "kernel";
+            arch = "riscv";
+            os = "linux";
+            compression = "gzip";
+            load = <0x0 0x80200000>;
+            entry = <0x0 0x80200000>;
+            hash-1 { algo = "crc32"; };
+        };
+        ramdisk-1 {
+            description = "OpenHarmony Ramdisk";
+            data = /incbin/("${work_dir}/boot.cpio.gz");
+            type = "ramdisk";
+            arch = "riscv";
+            os = "linux";
+            compression = "gzip";
+            load = <0x0 0x00000000>;
+            entry = <0x0 0x00000000>;
+            hash-1 { algo = "crc32"; };
+        };
+EOF
+
+    if [ -f "${DTB_FILE}" ]; then
+        cp "${DTB_FILE}" "${work_dir}/sg2002.dtb"
+        cat >> "${work_dir}/openharmony.its" << EOF
+        fdt-sg2002_licheervnano_sd {
+            description = "cvitek device tree - sg2002_licheervnano_sd";
+            data = /incbin/("${work_dir}/sg2002.dtb");
+            type = "flat_dt";
+            arch = "riscv";
+            compression = "none";
+            hash-1 { algo = "crc32"; };
+        };
+EOF
+    fi
+
+    cat >> "${work_dir}/openharmony.its" << EOF
+    };
+    configurations {
+        default = "config-sg2002_licheervnano_sd";
+        config-sg2002_licheervnano_sd {
+            description = "boot cvitek system with board sg2002_licheervnano_sd";
+            kernel = "kernel-1";
+            ramdisk = "ramdisk-1";
+EOF
+    if [ -f "${DTB_FILE}" ]; then
+        echo "            fdt = \"fdt-sg2002_licheervnano_sd\";" >> "${work_dir}/openharmony.its"
+    fi
+    cat >> "${work_dir}/openharmony.its" << EOF
+            hash-1 { algo = "crc32"; };
+        };
+    };
+};
+EOF
+
+    "${MKIMAGE}" -f "${work_dir}/openharmony.its" "${OUT_DIR}/genimage_input/boot.sd"
+    rm -rf "${work_dir}"
+    echo "  ✓ FIT image: ${OUT_DIR}/genimage_input/boot.sd"
+}
+
+gen_rootfs()
+{
+    echo "Generating rootfs (${ROOTFS_TYPE})..."
+    local rootfs_img="${OUT_DIR}/genimage_input/rootfs.sd"
+    local rootfs_dir="${OUT_DIR}/rootfs"
+    
+    rm -rf "${rootfs_dir}"
+    mkdir -p "${rootfs_dir}"
+    
+    # Copy OHOS rootfs
+    [ -d "${ROOTFS_DIR}/root" ] && cp -rf "${ROOTFS_DIR}/root"/* "${rootfs_dir}/"
+    [ -d "${ROOTFS_DIR}/system" ] && mkdir -p "${rootfs_dir}/system" && cp -rf "${ROOTFS_DIR}/system"/* "${rootfs_dir}/system/"
+    [ -d "${ROOTFS_DIR}/vendor" ] && mkdir -p "${rootfs_dir}/vendor" && cp -rf "${ROOTFS_DIR}/vendor"/* "${rootfs_dir}/vendor/"
+    mkdir -p "${rootfs_dir}/dev"
+
+    if [ "${ROOTFS_TYPE}" == "squashfs" ]; then
+        if command -v mksquashfs &> /dev/null; then
+            mksquashfs "${rootfs_dir}" "${rootfs_img}" \
+                -noappend -root-owned -comp xz -b 256k \
+                -p '/dev d 755 0 0' \
+                -p '/dev/console c 600 0 0 5 1' \
+                -p '/dev/null c 666 0 0 1 3'
+        else
+            echo "ERROR: mksquashfs not found"
+            exit 1
+        fi
+    else
+        dd if=/dev/zero of="${rootfs_img}" bs=1M count=1600
+        mkfs.ext4 -F -L rootfs "${rootfs_img}"
+    fi
+    echo "  ✓ Rootfs image: ${rootfs_img}"
+}
+
+prepare_input_files()
+{
+    echo "Preparing input files..."
+    cp "${FIP_BIN_SOURCE}" "${OUT_DIR}/genimage_input/fip.bin"
+    
+    # Search for optional vendor files
+    local fip_dir=$(dirname "${FIP_BIN_SOURCE}")
+    local file_list="\"fip.bin\", \"boot.sd\"," # Start with mandatory files
+    
+    # List of optional files to look for
+    local optional_files=("usb.dev" "usb.ncm" "usb.rndis" "wifi.sta" "gt9xx" "logo.jpeg" "ver")
+    
+    for file in "${optional_files[@]}"; do
+        if [ -f "${fip_dir}/${file}" ]; then
+            echo "  Found optional file: ${file}"
+            cp "${fip_dir}/${file}" "${OUT_DIR}/genimage_input/"
+            file_list="${file_list} \"${file}\","
+        fi
+    done
+    
+    # Generate genimage.cfg
+    cat > "${OUT_DIR}/genimage.cfg" << EOF
+image boot.vfat {
+    vfat {
+        label = "boot"
+        files = {
+            ${file_list}
+        }
+    }
+    size = 16M
+}
+
+image sg2002_${BOARD}_ohos.img {
+    hdimage {
+    }
+
+    partition boot {
+        partition-type = 0x0C
+        bootable = "true"
+        image = "boot.vfat"
+    }
+
+    partition rootfs {
+        partition-type = 0x83
+        image = "rootfs.sd"
+    }
+}
+EOF
+}
+
+run_genimage()
+{
+    echo "Running genimage..."
+    cd "${OUT_DIR}"
+    export LD_LIBRARY_PATH="$(dirname "${GENIMAGE}")/libconfuse/lib:${LD_LIBRARY_PATH}"
+    "${GENIMAGE}" \
+        --rootpath "${OUT_DIR}/rootfs" \
+        --tmppath "${OUT_DIR}/genimage_tmp" \
+        --inputpath "${OUT_DIR}/genimage_input" \
+        --outputpath "${OUT_DIR}" \
+        --config "${OUT_DIR}/genimage.cfg"
+        
+    echo "  ✓ Image created: ${OUT_DIR}/sg2002_${BOARD}_ohos.img"
+}
+
+main()
+{
+    check_required_files
+    create_output_dir
+    create_fit_image
+    gen_rootfs
+    prepare_input_files
+    run_genimage
+    
+    echo ""
+    echo "=========================================="
+    echo "Packaging Complete!"
+    echo "Image: ${OUT_DIR}/sg2002_${BOARD}_ohos.img"
+    echo "=========================================="
+}
+
+main

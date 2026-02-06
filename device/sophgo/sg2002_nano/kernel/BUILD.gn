@@ -1,0 +1,47 @@
+# Copyright (c) 2024 Sophgo Technologies Co., Ltd.
+# Licensed under the Apache License, Version 2.0
+
+import("//build/ohos.gni")
+
+kernel_build_script_dir = "//kernel/linux/patches"
+# SG2002 uses Linux 5.10 from LicheeRV-Nano-Build SDK
+kernel_source_dir = "//kernel/linux_5.10"
+
+action("kernel") {
+  script = "build_kernel.sh"
+  sources = [ kernel_source_dir ]
+  device_type = "sg2002_nano"
+
+  product_path = "vendor/$product_company/$product_name"
+  outputs = [ "$root_build_dir/packages/phone/images/Image" ]
+  args = [
+    rebase_path(kernel_build_script_dir, root_build_dir),
+    rebase_path("$root_out_dir/../KERNEL_OBJ"),
+    rebase_path("$root_build_dir/packages/phone/images"),
+    device_type,
+    rebase_path("$root_out_dir"),
+    product_path,
+  ]
+}
+
+kernel_modules = []
+kernel_modules_targets = []
+
+foreach(km, kernel_modules) {
+  _name = get_path_info(km, "file")
+  ohos_prebuilt_shared_library(_name) {
+    deps = [ ":modules" ]
+    source = km
+    module_install_dir = "modules"
+    install_images = [
+      "vendor",
+      "updater",
+    ]
+    part_name = "sg2002_products"
+  }
+  kernel_modules_targets += [ ":$_name" ]
+}
+
+group("all_modules") {
+  deps = kernel_modules_targets
+}

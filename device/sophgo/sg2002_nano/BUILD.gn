@@ -1,0 +1,14 @@
+# Copyright (C) 2024 Sophgo Technologies Co., Ltd. All rights reserved.
+# SG2002 (LicheeRV Nano) OpenHarmony Build Configuration
+
+import("//build/ohos.gni")
+
+print("sg2002_nano_group in")
+
+group("sg2002_nano_group") {
+  deps = [
+    "build:rc_files",
+    "build/rootfs:init_configs",
+    "kernel:kernel",
+  ]
+}

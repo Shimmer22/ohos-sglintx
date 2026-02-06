@@ -1,0 +1,13 @@
+{
+  "product_name": "sg2002_nano",
+  "product_company": "sophgo",
+  "product_device": "sg2002_nano",
+  "version": "2.0",
+  "type": "standard",
+  "inherit": [
+    "_ohos_riscv64_parts.json"
+  ],
+  "parts":{
+    "sg2002_products:sg2002_products":{}
+  }
+}

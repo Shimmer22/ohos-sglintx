@@ -1,0 +1,48 @@
+{
+  "product_name": "sg2002_nano",
+  "ohos_version": "OpenHarmony 3.0",
+  "device_company": "sophgo",
+  "board": "licheerv_nano",
+  "kernel_type": "linux",
+  "kernel_version": "5.10",
+  "subsystems": [
+    {
+      "subsystem": "kernel",
+      "components": [
+        { "component": "linux_5_10", "features":[] }
+      ]
+    },
+    {
+      "subsystem": "startup",
+      "components": [
+        { "component": "init", "features":[] }
+      ]
+    },
+    {
+      "subsystem": "hiviewdfx",
+      "components": [
+        { "component": "hilog", "features":[] },
+        { "component": "hisysevent", "features":[] }
+      ]
+    },
+    {
+      "subsystem": "communication",
+      "components": [
+        { "component": "ipc", "features":[] }
+      ]
+    },
+    {
+      "subsystem": "hdf",
+      "components": [
+        { "component": "drivers_framework", "features":[] },
+        { "component": "hdf_adapter", "features":[] }
+      ]
+    },
+    {
+      "subsystem": "utils",
+      "components": [
+        { "component": "utils_base", "features":[] }
+      ]
+    }
+  ]
+}

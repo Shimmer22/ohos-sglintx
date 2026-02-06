@@ -1,0 +1,10 @@
+{
+  "subsystem": "sg2002_products",
+  "parts": {
+    "sg2002_products": {
+      "module_list": [
+        "//device/sophgo/sg2002_nano:sg2002_nano_group"
+      ]
+    }
+  }
+}
