@@ -1,0 +1,351 @@
+#!/bin/bash
+
+# Copyright (C) 2024 Sophgo Technologies Co., Ltd.
+# Licensed under the Apache License, Version 2.0
+# SG2002 (LicheeRV Nano) OpenHarmony Firmware Pack Script V3
+# Based on Vendor SDK genimage workflow
+
+set -e
+
+# Configuration
+CHIP="sg2002"
+BOARD="licheerv_nano"
+
+# Default values
+ROOTFS_TYPE="squashfs"
+FIP_BIN_SOURCE=""
+
+# Output directories
+# In Docker, we assume we are at /home/openharmony/device/sophgo/build, so TOPDIR is /home/openharmony
+TOPDIR=$(cd $(dirname $0)/../../..; pwd)
+OUT_DIR="${TOPDIR}/out/${BOARD}"
+OHOS_OUT="${TOPDIR}/out/ohos-riscv64-release"
+KERNEL_OBJ="${TOPDIR}/out/KERNEL_OBJ"
+
+# Fixed DTB Path (Compulsory)
+FIXED_DTB="${KERNEL_OBJ}/kernel/src_tmp/linux-5.10/arch/riscv/boot/dts/thead/sg2002_fixed.dtb"
+
+# Source paths
+KERNEL_SRC="${KERNEL_OBJ}/kernel/src_tmp/linux-5.10"
+
+# Vendor SDK paths
+VENDOR_SDK="${TOPDIR}/LicheeRV-Nano-Build"
+# Locate genimage in vendor SDK or system
+if [ -f "${VENDOR_SDK}/build/tools/common/sd_tools/genimage" ]; then
+    GENIMAGE="${VENDOR_SDK}/build/tools/common/sd_tools/genimage"
+elif command -v genimage &> /dev/null; then
+    GENIMAGE=$(command -v genimage)
+else
+    echo "ERROR: genimage not found! Please check VENDOR_SDK path or install genimage."
+    exit 1
+fi
+
+MKIMAGE="${VENDOR_SDK}/build/tools/common/prebuild/mkimage"
+if [ ! -x "${MKIMAGE}" ]; then
+    if command -v mkimage &> /dev/null; then
+        MKIMAGE=$(command -v mkimage)
+    else
+        echo "ERROR: mkimage not found!"
+        exit 1
+    fi
+fi
+
+echo "=========================================="
+echo "SG2002 OpenHarmony Firmware Pack Script V3"
+echo "Using genimage for packaging"
+echo "=========================================="
+
+pack_usage()
+{
+    echo "Usage: $0 [options]"
+    echo ""
+    echo "Options:"
+    echo "  -f PATH       fip.bin path (required)"
+    echo "  -t TYPE       Root filesystem type: squashfs (default) or ext4"
+    echo "  -k PATH       Kernel image path (default: auto-detect)"
+    echo "  -r PATH       Rootfs directory (default: ${OHOS_OUT}/packages/phone)"
+    echo "  -o PATH       Output directory (default: ${OUT_DIR})"
+    echo "  -h            Show this help message"
+    echo ""
+}
+
+# Parse arguments
+while getopts "t:k:r:o:f:h" opt; do
+    case $opt in
+        t) ROOTFS_TYPE="$OPTARG" ;;
+        k) KERNEL_IMAGE="$OPTARG" ;;
+        r) ROOTFS_DIR="$OPTARG" ;;
+        o) OUT_DIR="$OPTARG" ;;
+        f) FIP_BIN_SOURCE="$OPTARG" ;;
+        h) pack_usage; exit 0 ;;
+        \?) echo "Invalid option: -$OPTARG" >&2; pack_usage; exit 1 ;;
+    esac
+done
+
+# Set default paths
+if [ -z "$KERNEL_IMAGE" ]; then
+    KERNEL_IMAGE="${KERNEL_SRC}/arch/riscv/boot/Image"
+fi
+
+if [ -z "$ROOTFS_DIR" ]; then
+    ROOTFS_DIR="${OHOS_OUT}/packages/phone"
+fi
+
+echo ""
+echo "Configuration:"
+echo "  Chip:           ${CHIP}"
+echo "  Board:          ${BOARD}"
+echo "  Rootfs type:    ${ROOTFS_TYPE}"
+echo "  Kernel:         ${KERNEL_IMAGE}"
+echo "  DTB:            ${FIXED_DTB} (Patched & Fixed)"
+echo "  Ramdisk:        NONE (Direct Rootfs Mount)"
+echo "  Rootfs dir:     ${ROOTFS_DIR}"
+echo "  fip.bin:        ${FIP_BIN_SOURCE}"
+echo "  Output:         ${OUT_DIR}"
+echo "  Genimage:       ${GENIMAGE}"
+echo ""
+
+check_required_files()
+{
+    if [ ! -f "${KERNEL_IMAGE}" ]; then
+        echo "ERROR: Kernel image not found: ${KERNEL_IMAGE}"
+        exit 1
+    fi
+    
+    if [ ! -f "${FIXED_DTB}" ]; then
+        echo "ERROR: Fixed DTB not found at ${FIXED_DTB}. Please perform DTS patching first."
+        exit 1
+    fi
+    
+    if [ ! -d "${ROOTFS_DIR}" ]; then
+        echo "ERROR: Rootfs directory not found: ${ROOTFS_DIR}"
+        exit 1
+    fi
+    
+    if [ -z "$FIP_BIN_SOURCE" ]; then
+        echo "ERROR: fip.bin not provided. Use -f option."
+        exit 1
+    fi
+    
+    if [ ! -f "${FIP_BIN_SOURCE}" ]; then
+        echo "ERROR: fip.bin file not found at: ${FIP_BIN_SOURCE}"
+        exit 1
+    fi
+}
+
+create_output_dir()
+{
+    echo "Creating output directory..."
+    rm -rf "${OUT_DIR}"
+    mkdir -p "${OUT_DIR}/genimage_input"
+    mkdir -p "${OUT_DIR}/genimage_tmp"
+}
+
+create_fit_image()
+{
+    echo "Creating FIT image (boot.itb)..."
+    local work_dir="${OUT_DIR}/fit_work"
+    mkdir -p "${work_dir}"
+    
+    # Copy and compress kernel
+    cp "${KERNEL_IMAGE}" "${work_dir}/Image"
+    gzip -9 -f "${work_dir}/Image"
+    
+    # NO RAMDISK GENERATION HERE
+    
+    # Create ITS
+    # Note: Removed ramdisk nodes entirely
+    cat > "${work_dir}/openharmony.its" << EOF
+/dts-v1/;
+/ {
+    description = "OpenHarmony SG2002 Kernel + FDT";
+    #address-cells = <2>;
+    images {
+        kernel-1 {
+            description = "OpenHarmony Linux Kernel";
+            data = /incbin/("${work_dir}/Image.gz");
+            type = "kernel";
+            arch = "riscv";
+            os = "linux";
+            compression = "gzip";
+            load = <0x0 0x80200000>;
+            entry = <0x0 0x80200000>;
+            hash-1 { algo = "crc32"; };
+        };
+EOF
+
+    # Always use FIXED_DTB
+    cp "${FIXED_DTB}" "${work_dir}/sg2002.dtb"
+    cat >> "${work_dir}/openharmony.its" << EOF
+        fdt-sg2002_licheervnano_sd {
+            description = "cvitek device tree - sg2002_licheervnano_sd";
+            data = /incbin/("${work_dir}/sg2002.dtb");
+            type = "flat_dt";
+            arch = "riscv";
+            compression = "none";
+            hash-1 { algo = "crc32"; };
+        };
+EOF
+
+    cat >> "${work_dir}/openharmony.its" << EOF
+    };
+    configurations {
+        default = "config-sg2002_licheervnano_sd";
+        config-sg2002_licheervnano_sd {
+            description = "boot cvitek system with board sg2002_licheervnano_sd";
+            kernel = "kernel-1";
+            fdt = "fdt-sg2002_licheervnano_sd";
+            hash-1 { algo = "crc32"; };
+        };
+    };
+};
+EOF
+
+    "${MKIMAGE}" -f "${work_dir}/openharmony.its" "${OUT_DIR}/genimage_input/boot.sd"
+    rm -rf "${work_dir}"
+    echo "  ✓ FIT image: ${OUT_DIR}/genimage_input/boot.sd"
+}
+
+gen_rootfs()
+{
+    echo "Generating rootfs (${ROOTFS_TYPE})..."
+    local rootfs_img="${OUT_DIR}/genimage_input/rootfs.sd"
+    local rootfs_dir="${OUT_DIR}/rootfs"
+    
+    rm -rf "${rootfs_dir}"
+    mkdir -p "${rootfs_dir}"
+    
+    # Copy OHOS rootfs
+    [ -d "${ROOTFS_DIR}/root" ] && cp -rf "${ROOTFS_DIR}/root"/* "${rootfs_dir}/"
+    [ -d "${ROOTFS_DIR}/system" ] && mkdir -p "${rootfs_dir}/system" && cp -rf "${ROOTFS_DIR}/system"/* "${rootfs_dir}/system/"
+    [ -d "${ROOTFS_DIR}/vendor" ] && mkdir -p "${rootfs_dir}/vendor" && cp -rf "${ROOTFS_DIR}/vendor"/* "${rootfs_dir}/vendor/"
+    mkdir -p "${rootfs_dir}/dev"
+
+    if [ "${ROOTFS_TYPE}" == "squashfs" ]; then
+        if command -v mksquashfs &> /dev/null; then
+            mksquashfs "${rootfs_dir}" "${rootfs_img}" \
+                -noappend -root-owned -comp xz -b 256k \
+                -p '/dev d 755 0 0' \
+                -p '/dev/console c 600 0 0 5 1' \
+                -p '/dev/null c 666 0 0 1 3'
+            echo "  ✓ Rootfs image: ${rootfs_img}"
+        else
+            echo "ERROR: mksquashfs not found"
+            exit 1
+        fi
+    else
+        # Manual EXT4 generation to ensure root ownership (UID/GID 0) without root privileges
+        # genext2fs -U squashes all UIDs/GIDs to 0
+        local genext2fs="${VENDOR_SDK}/build/tools/common/sd_tools/genext2fs"
+        local rootfs_ext4="${OUT_DIR}/genimage_input/rootfs.ext4"
+        
+        # 2GB = 2097152 KB. Block size 4096. 2097152 / 4 = 524288 blocks calculation is wrong if input is KB
+        # 2GB = 2 * 1024 * 1024 * 1024 bytes = 2147483648 bytes
+        # 2147483648 / 4096 = 524288 blocks
+        local blocks=524288
+        
+        echo "  Generating EXT4 image (2GB) with genext2fs..."
+        if [ ! -x "$genext2fs" ]; then
+             echo "ERROR: genext2fs not found at $genext2fs"
+             exit 1
+        fi
+        
+        "$genext2fs" \
+            -B 4096 \
+            -b $blocks \
+            -d "${rootfs_dir}" \
+            -U \
+            "${rootfs_ext4}"
+            
+        echo "  Upgrading to EXT4 features..."
+        tune2fs -O extents,uninit_bg,dir_index,has_journal "${rootfs_ext4}"
+        tune2fs -L "rootfs" "${rootfs_ext4}"
+        # Force fsck to fix any inconsistencies from upgrade
+        e2fsck -p -f "${rootfs_ext4}" || true
+        
+        echo "  ✓ Rootfs image: ${rootfs_ext4}"
+    fi
+}
+
+prepare_input_files()
+{
+    echo "Preparing input files..."
+    cp "${FIP_BIN_SOURCE}" "${OUT_DIR}/genimage_input/fip.bin"
+    
+    # Search for optional vendor files
+    local fip_dir=$(dirname "${FIP_BIN_SOURCE}")
+    local file_list="\"fip.bin\", \"boot.sd\"," # Start with mandatory files
+    
+    # List of optional files to look for
+    local optional_files=("usb.dev" "usb.ncm" "usb.rndis" "wifi.sta" "gt9xx" "logo.jpeg" "ver")
+    
+    for file in "${optional_files[@]}"; do
+        if [ -f "${fip_dir}/${file}" ]; then
+            echo "  Found optional file: ${file}"
+            cp "${fip_dir}/${file}" "${OUT_DIR}/genimage_input/"
+            file_list="${file_list} \"${file}\","
+        fi
+    done
+    
+    # Generate genimage.cfg
+    cat > "${OUT_DIR}/genimage.cfg" << EOF
+image boot.vfat {
+    vfat {
+        label = "boot"
+        files = {
+            ${file_list}
+        }
+    }
+    size = 16M
+}
+
+image sg2002_${BOARD}_ohos.img {
+    hdimage {
+    }
+
+    partition boot {
+        partition-type = 0x0C
+        bootable = "true"
+        image = "boot.vfat"
+    }
+
+    partition rootfs {
+        partition-type = 0x83
+        image = "rootfs.ext4" 
+    }
+}
+EOF
+}
+
+run_genimage()
+{
+    echo "Running genimage..."
+    cd "${OUT_DIR}"
+    export LD_LIBRARY_PATH="$(dirname "${GENIMAGE}")/libconfuse/lib:${LD_LIBRARY_PATH}"
+    "${GENIMAGE}" \
+        --rootpath "${OUT_DIR}/rootfs" \
+        --tmppath "${OUT_DIR}/genimage_tmp" \
+        --inputpath "${OUT_DIR}/genimage_input" \
+        --outputpath "${OUT_DIR}" \
+        --config "${OUT_DIR}/genimage.cfg"
+        
+    echo "  ✓ Image created: ${OUT_DIR}/sg2002_${BOARD}_ohos.img"
+}
+
+main()
+{
+    check_required_files
+    create_output_dir
+    create_fit_image
+    gen_rootfs
+    prepare_input_files
+    run_genimage
+    
+    echo ""
+    echo "=========================================="
+    echo "Packaging Complete!"
+    echo "Image: ${OUT_DIR}/sg2002_${BOARD}_ohos.img"
+    echo "=========================================="
+}
+
+main
