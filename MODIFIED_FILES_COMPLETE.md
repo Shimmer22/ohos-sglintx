@@ -32,10 +32,10 @@
 change/
 ├── sg2002_compiler_analysis.md          # 编译器分析文档
 ├── sg2002_porting_status.md             # 移植状态报告
-├── kernel_issue_analysis.md             # 内核问题分析
+
 ├── KERNEL_BUILD_GUIDE.md                # 内核构建指南
 ├── MODIFIED_FILES_COMPLETE.md           # 本文件
-└── modified_files_list.txt              # 早期清单
+
 ```
 
 #### 设备配置 (7个)
@@ -147,10 +147,10 @@ kernel/linux/patches/
 /home/openharmony/change/
 ├── MODIFIED_FILES_COMPLETE.md          # 本文件
 ├── KERNEL_BUILD_GUIDE.md               # 内核构建指南
-├── kernel_issue_analysis.md            # 内核问题分析
+
 ├── sg2002_compiler_analysis.md         # 编译器分析
 ├── sg2002_porting_status.md            # 移植状态
-├── modified_files_list.txt             # 早期清单
+
 │
 ├── device/
 │   └── sophgo/

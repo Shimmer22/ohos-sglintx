@@ -27,7 +27,7 @@
 | `MODIFIED_FILES_COMPLETE.md` | 修改文件完整清单 | ✅ 新增 |
 | `PACKING_GUIDE.md` | 固件打包和烧录指南 | ✅ 新增 |
 | `VENDOR_SDK_ANALYSIS.md` | 厂家SDK镜像分析报告 | ✅ 新增 |
-| `kernel_issue_analysis.md` | 内核问题分析 | ✅ 新增 |
+
 | `sg2002_compiler_analysis.md` | 编译器使用分析 | ✅ 新增 |
 | `sg2002_porting_status.md` | 移植状态报告 | ✅ 新增 |
 
