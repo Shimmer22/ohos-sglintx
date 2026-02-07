@@ -28,6 +28,22 @@ make -f kernel-5.10.mk
 # 输出: out/KERNEL_OBJ/kernel/src_tmp/linux-5.10/arch/riscv/boot/Image
 ```
 
+### 2. Docker 环境构建 (可选)
+
+如果是在 WSL 或其他非标准 Linux 环境下，建议使用 Docker 进行构建。
+
+```bash
+# 1. 启动 Docker 容器 (假设镜像名为 ohos-build)
+docker run -it -v $(pwd):/home/openharmony -w /home/openharmony ohos_build_env bash
+
+# 2. 在容器内执行构建命令
+./build.sh --product-name sg2002_nano --ccache
+
+# 3. 如果需要修改文件但容器内没有编辑器
+# 可以将文件复制到 /tmp 进行编辑，然后复制回源码目录
+# 或者在宿主机编辑，因为目录是挂载的
+```
+
 ## 打包脚本
 
 ### 基本用法

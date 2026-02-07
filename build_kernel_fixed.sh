@@ -44,6 +44,12 @@ echo 'CONFIG_ANDROID_BINDER_DEVICES="binder,hwbinder,vndbinder"' >> $CONFIG_FILE
 sed -i '/CONFIG_ANDROID_BINDERFS/d' $CONFIG_FILE
 echo "# CONFIG_ANDROID_BINDERFS is not set" >> $CONFIG_FILE
 
+# Force Wi-Fi support to built-in
+sed -i 's/CONFIG_CFG80211=m/CONFIG_CFG80211=y/' $CONFIG_FILE
+sed -i 's/# CONFIG_CFG80211 is not set/CONFIG_CFG80211=y/' $CONFIG_FILE
+sed -i 's/CONFIG_RFKILL=m/CONFIG_RFKILL=y/' $CONFIG_FILE
+sed -i 's/# CONFIG_RFKILL is not set/CONFIG_RFKILL=y/' $CONFIG_FILE
+
 echo "Configuration patching complete. Verifying..."
 grep -E "CONFIG_ASHMEM|CONFIG_ANDROID_BINDER" $CONFIG_FILE
 
