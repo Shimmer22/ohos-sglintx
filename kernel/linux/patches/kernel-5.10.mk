@@ -90,6 +90,19 @@ ifeq ($(PRODUCT_NAME), sg2002_nano)
 endif
 	@$(KERNEL_MAKE) -C $(KERNEL_SRC_TMP_PATH) ARCH=$(KERNEL_ARCH) $(KERNEL_CROSS_COMPILE) distclean
 	@$(KERNEL_MAKE) -C $(KERNEL_SRC_TMP_PATH) ARCH=$(KERNEL_ARCH) $(KERNEL_CROSS_COMPILE) $(DEFCONFIG_FILE)
+	@echo "Enforcing D1-style Binder config (/dev/binder, binderfs disabled)..."
+	@sed -i '/^CONFIG_ANDROID=/d' $(KERNEL_SRC_TMP_PATH)/.config
+	@sed -i '/^CONFIG_ANDROID_BINDER_IPC=/d' $(KERNEL_SRC_TMP_PATH)/.config
+	@sed -i '/^CONFIG_ANDROID_BINDER_DEVICES=/d' $(KERNEL_SRC_TMP_PATH)/.config
+	@sed -i '/^CONFIG_ANDROID_BINDERFS=/d' $(KERNEL_SRC_TMP_PATH)/.config
+	@sed -i '/^# CONFIG_ANDROID_BINDERFS is not set/d' $(KERNEL_SRC_TMP_PATH)/.config
+	@printf '%s\n' \
+		'CONFIG_ANDROID=y' \
+		'CONFIG_ANDROID_BINDER_IPC=y' \
+		'CONFIG_ANDROID_BINDER_DEVICES="binder,hwbinder,vndbinder"' \
+		'# CONFIG_ANDROID_BINDERFS is not set' >> $(KERNEL_SRC_TMP_PATH)/.config
+	@$(KERNEL_MAKE) -C $(KERNEL_SRC_TMP_PATH) ARCH=$(KERNEL_ARCH) $(KERNEL_CROSS_COMPILE) olddefconfig
+	@grep -E '^CONFIG_ANDROID=|^CONFIG_ANDROID_BINDER_IPC=|^CONFIG_ANDROID_BINDER_DEVICES=|^CONFIG_ANDROID_BINDERFS=|^# CONFIG_ANDROID_BINDERFS is not set' $(KERNEL_SRC_TMP_PATH)/.config
 	@$(KERNEL_MAKE) -C $(KERNEL_SRC_TMP_PATH) ARCH=$(KERNEL_ARCH) $(KERNEL_CROSS_COMPILE) -j$(shell nproc) Image dtbs
 
 .PHONY: build-kernel clean info
