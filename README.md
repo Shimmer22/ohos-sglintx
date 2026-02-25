@@ -3,6 +3,14 @@
 SG2002（LicheeRV Nano）移植 OpenHarmony 标准系统（riscv64）的复现仓库。  
 本仓库目标是提供一套可重复执行的流程：从全新源码环境出发，完成移植文件注入、用户态构建、内核构建、单镜像打包与结果验证。
 
+## 文档索引（docs）
+
+- `docs/01_repository_layout.md`：仓库结构与关键文件职责
+- `docs/02_kernel_binder.md`：内核构建与 Binder 防错要求
+- `docs/03_pack_flash.md`：打包、镜像组成验证与烧录
+- `docs/04_troubleshooting.md`：常见问题排查
+- `docs/05_repo_sync_recovery.md`：`repo sync` 损坏仓库自动修复流程
+
 ## 1. 仓库作用
 
 - 提供 SG2002 对应的 `device/vendor/productdefine/kernel` 移植文件。
